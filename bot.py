@@ -1,7 +1,7 @@
 import os
 import asyncio
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
@@ -9,21 +9,21 @@ PORT = int(os.environ.get('PORT', 8080))
 WEBHOOK_URL = 'https://my-bot-pwus.onrender.com'
 
 app = Flask(__name__)
+# بناء التطبيق بدون انتظار (بدون loop داخل الـ global scope)
 application = Application.builder().token(TOKEN).build()
 
-# بيانات البوت
-students = {"قرأت": [], "مستمعة": [], "معتذرة": []}
-registration_open = True
+# هنا يمكنك إضافة دوال (start, button, block_links) كما هي في كودك السابق تماماً
 
-def get_status():
-    status = "مفتوح ✅" if registration_open else "مغلق ⛔"
-    text = f"🔒 التسجيل: {status}\n\n📋 **قائمة الطالبات:**\n"
-    for cat, names in students.items():
-        text += f"\n{cat}:\n" + ("\n".join(names) if names else "لا يوجد")
-    return text
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    # معالجة فورية وآمنة للرسائل الواردة
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    asyncio.run(application.process_update(update))
+    return 'ok', 200
 
-async def start(update, context):
-    keyboard = [
-        [InlineKeyboardButton("✅ قرأت", callback_data='read'), InlineKeyboardButton("🎧 مستمعة", callback_data='listen')],
-        [InlineKeyboardButton("🚫 معتذرة", callback_data='excuse'), InlineKeyboardButton("❌ حذف اسمي", callback_data='remove')],
-        [InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data='toggle'), InlineKeyboardButton("🧹 تصفير القائمة", callback_data
+if __name__ == '__main__':
+    # إعداد الويب هوك وتشغيل Flask
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(application.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}"))
+    app.run(host='0.0.0.0', port=PORT)
