@@ -1,35 +1,20 @@
 import logging
-import threading
-from flask import Flask
 from telegram.ext import ApplicationBuilder, MessageHandler, filters
 
-# إعداد السجلات لمتابعة حالة البوت
+# إعداد السجلات
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# التوكن الخاص بك
-BOT_TOKEN = '8817548868:AAEBP-C8ift1Z-_ydpDzmticw18gDW2_Kjc'
-
-# إعداد Flask لغرض البقاء نشطاً (UptimeRobot)
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "البوت يعمل الآن بنجاح!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+# ضعي التوكن الخاص بك هنا
+BOT_TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
 
 # وظيفة البوت
 async def handle_message(update, context):
-    await update.message.reply_text("أهلاً! البوت يعمل الآن 24/7 على السحابة.")
+    await update.message.reply_text("البوت يعمل الآن بنجاح!")
 
 if __name__ == '__main__':
-    # تشغيل Flask في خيط منفصل (Thread) لضمان عدم حدوث تضارب
-    threading.Thread(target=run_flask).start()
-
-    # تشغيل البوت بطريقة polling
+    print("🚀 البوت بدأ العمل!")
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
-    print("🚀 البوت بدأ العمل الآن!")
+    # استخدام Polling وهو الطريقة الصحيحة
     application.run_polling()
