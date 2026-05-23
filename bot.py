@@ -11,7 +11,7 @@ app = Flask(__name__)
 bot = Bot(TOKEN)
 application = Application.builder().token(TOKEN).build()
 
-# تعريف المتغيرات العامة في البداية
+# المتغيرات العامة
 students = {"قرأت": [], "مستمعة": [], "معتذرة": []}
 registration_open = True
 
@@ -31,12 +31,13 @@ async def start(update, context):
     await update.message.reply_text(get_status(), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def button(update, context):
-    global registration_open # هذا السطر يحل مشكلة الخطأ
+    global registration_open # تم إضافة global هنا لإصلاح الخطأ
     query = update.callback_query
     user = query.from_user.full_name
     uid = query.from_user.id
     chat_id = query.message.chat_id
     
+    # التحقق من صلاحيات المشرفة
     member = await context.bot.get_chat_member(chat_id, uid)
     is_admin = member.status in ['administrator', 'creator']
 
