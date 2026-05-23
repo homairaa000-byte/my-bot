@@ -1,36 +1,18 @@
-import logging
-import os
-from flask import Flask
-from threading import Thread
+ import logging
 from telegram.ext import ApplicationBuilder, MessageHandler, filters
 
-# إعداد السجلات
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
+# التوكن الخاص بك
 BOT_TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
 
-# إنشاء خادم ويب بسيط ليرضى عنه Render
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "البوت يعمل الآن!"
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-# وظيفة البوت
+# وظيفة الرد
 async def handle_message(update, context):
     await update.message.reply_text("البوت يعمل الآن بنجاح!")
 
 if __name__ == '__main__':
-    # تشغيل خادم الويب في Thread منفصل
-    Thread(target=run_web_server).start()
-    
-    # تشغيل البوت
+    # بناء التطبيق
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
-    print("🚀 البوت بدأ العمل!")
+    # تشغيل البوت مباشرة (بدون Flask أو Threads معقدة)
+    print("🚀 البوت يعمل الآن!")
     application.run_polling()
