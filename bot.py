@@ -5,13 +5,13 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
 PORT = int(os.environ.get('PORT', 8080))
-WEBHOOK_URL = 'https://my-bot-pwus.onrender.com' 
+WEBHOOK_URL = 'https://my-bot-pwus.onrender.com'
 
 app = Flask(__name__)
 bot = Bot(TOKEN)
 application = Application.builder().token(TOKEN).build()
 
-# بيانات القائمة وحالة التسجيل
+# تعريف المتغيرات العامة في البداية
 students = {"قرأت": [], "مستمعة": [], "معتذرة": []}
 registration_open = True
 
@@ -31,12 +31,12 @@ async def start(update, context):
     await update.message.reply_text(get_status(), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def button(update, context):
+    global registration_open # هذا السطر يحل مشكلة الخطأ
     query = update.callback_query
     user = query.from_user.full_name
     uid = query.from_user.id
     chat_id = query.message.chat_id
     
-    # التحقق من صلاحية المشرفة (تلقائياً من تليجرام)
     member = await context.bot.get_chat_member(chat_id, uid)
     is_admin = member.status in ['administrator', 'creator']
 
@@ -49,7 +49,6 @@ async def button(update, context):
         students["قرأت" if query.data == 'read' else "مستمعة" if query.data == 'listen' else "معتذرة"].append(user)
     
     elif query.data == 'toggle' and is_admin:
-        global registration_open
         registration_open = not registration_open
         await query.answer(f"تم {'فتح' if registration_open else 'قفل'} التسجيل")
     
@@ -60,7 +59,6 @@ async def button(update, context):
     await query.edit_message_text(text=get_status(), reply_markup=query.message.reply_markup, parse_mode='Markdown')
 
 async def block_links(update, context):
-    # المشرفات فقط يمكنهن إرسال روابط
     member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
     if member.status not in ['administrator', 'creator']:
         await update.message.delete()
