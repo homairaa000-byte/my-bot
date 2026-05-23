@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
 PORT = int(os.environ.get('PORT', 8080))
@@ -11,63 +11,41 @@ app = Flask(__name__)
 bot = Bot(TOKEN)
 application = Application.builder().token(TOKEN).build()
 
-# المتغيرات العامة
-students = {"قرأت": [], "مستمعة": [], "معتذرة": []}
+# تعريف القوائم والمتغير العام
 registration_open = True
+students = {"قرأت": [], "مستمعة": [], "معتذرة": []}
 
-def get_status():
-    status_text = "🔒 التسجيل: " + ("مفتوح ✅" if registration_open else "مغلق ⛔") + "\n\n"
-    status_text += "📋 **قائمة الطالبات:**\n\n✅ القارئات:\n" + ("\n".join(students["قرأت"]) or "لا يوجد")
-    status_text += "\n\n🎧 المستمعات:\n" + ("\n".join(students["مستمعة"]) or "لا يوجد")
-    status_text += "\n\n🚫 المعتذرات:\n" + ("\n".join(students["معتذرة"]) or "لا يوجد")
-    return status_text
+def get_status_text():
+    status = "مفتوح ✅" if registration_open else "مغلق ⛔"
+    text = f"🔒 حالة التسجيل: {status}\n\n📋 القائمة:\n"
+    for category, names in students.items():
+        text += f"\n{category}:\n" + ("\n".join(names) if names else "لا يوجد")
+    return text
 
 async def start(update, context):
     keyboard = [
         [InlineKeyboardButton("✅ قرأت", callback_data='read'), InlineKeyboardButton("🎧 مستمعة", callback_data='listen')],
-        [InlineKeyboardButton("🚫 معتذرة", callback_data='excuse'), InlineKeyboardButton("❌ حذف اسمي", callback_data='remove')],
-        [InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data='toggle'), InlineKeyboardButton("🧹 تصفير القائمة", callback_data='clear')]
+        [InlineKeyboardButton("🚫 معتذرة", callback_data='excuse')],
+        [InlineKeyboardButton("❌ حذف اسمي", callback_data='remove')]
     ]
-    await update.message.reply_text(get_status(), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(get_status_text(), reply_markup=reply_markup)
 
-async def button(update, context):
-    global registration_open # تم إضافة global هنا لإصلاح الخطأ
+async def button_click(update, context):
+    global registration_open
     query = update.callback_query
     user = query.from_user.full_name
-    uid = query.from_user.id
-    chat_id = query.message.chat_id
-    
-    # التحقق من صلاحيات المشرفة
-    member = await context.bot.get_chat_member(chat_id, uid)
-    is_admin = member.status in ['administrator', 'creator']
+    data = query.data
 
-    if query.data in ['read', 'listen', 'excuse']:
-        if not registration_open and not is_admin:
-            await query.answer("التسجيل مغلق حالياً!", show_alert=True)
-            return
-        for cat in students:
-            if user in students[cat]: students[cat].remove(user)
-        students["قرأت" if query.data == 'read' else "مستمعة" if query.data == 'listen' else "معتذرة"].append(user)
-    
-    elif query.data == 'toggle' and is_admin:
-        registration_open = not registration_open
-        await query.answer(f"تم {'فتح' if registration_open else 'قفل'} التسجيل")
-    
-    elif query.data == 'clear' and is_admin:
-        for cat in students: students[cat] = []
-        await query.answer("تم تصفير القائمة!")
+    if not registration_open and data != 'remove':
+        await query.answer("التسجيل مغلق حالياً!", show_alert=True)
+        return
 
-    await query.edit_message_text(text=get_status(), reply_markup=query.message.reply_markup, parse_mode='Markdown')
-
-async def block_links(update, context):
-    member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
-    if member.status not in ['administrator', 'creator']:
-        await update.message.delete()
-        await update.message.reply_text("⛔ ممنوع إرسال روابط هنا!", reply_to_message_id=update.message.message_id)
+    # منطق إضافة أو حذف الأسماء هنا...
+    await query.answer(f"تم اختيار: {data}")
 
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button))
-application.add_handler(MessageHandler(filters.Entity("url"), block_links))
+application.add_handler(CallbackQueryHandler(button_click))
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
