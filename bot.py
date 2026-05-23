@@ -1,54 +1,61 @@
 import os
-from threading import Thread
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
+from flask import Flask, request
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# النظام للعمل 24/7
-app_flask = Flask('')
-@app_flask.route('/')
-def home(): return "البوت يعمل بنجاح!"
-def run_flask(): app_flask.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-Thread(target=run_flask).start()
+TOKEN = '8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY'
+PORT = int(os.environ.get('PORT', 8080))
+WEBHOOK_URL = 'https://my-bot-pwus.onrender.com' 
 
-BOT_TOKEN = "8817548868:AAHA4NrB7j28k7xSoIe2EVd3nZjZoA_rHJY"
+app = Flask(__name__)
+bot = Bot(TOKEN)
+application = Application.builder().token(TOKEN).build()
 
-# القائمة (اللوحة)
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# قاموس لتخزين الحالات: {name: status}
+students = {}
+
+def get_list_text():
+    # تقسيم الأسماء حسب الحالة
+    readers = [f"✅ {name}" for name, status in students.items() if status == "قرأت"]
+    listeners = [name for name, status in students.items() if status == "مستمعة"]
+    absents = [name for name, status in students.items() if status == "معتذرة"]
+    
+    text = "📋 **قائمة الطالبات:**\n\n"
+    text += "✅ **القارئات:**\n" + ("\n".join(readers) if readers else "لا يوجد") + "\n\n"
+    text += "🎧 **المستمعات:**\n" + ("\n".join(listeners) if listeners else "لا يوجد") + "\n\n"
+    text += "⛔ **المعتذرات:**\n" + ("\n".join(absents) if absents else "لا يوجد")
+    return text
+
+async def start(update, context):
+    user = update.effective_user.full_name
+    if user not in students:
+        students[user] = "مسجلة"
+    
     keyboard = [
-        [InlineKeyboardButton("لوحة المشرفات 👮‍♀️", callback_data='admin')],
-        [InlineKeyboardButton("المساعدة ℹ️", callback_data='help')],
-        [InlineKeyboardButton("الإعدادات ⚙️", callback_data='settings')]
+        [InlineKeyboardButton("✅ قرأت", callback_data='read'), InlineKeyboardButton("🎧 مستمعة", callback_data='listen')],
+        [InlineKeyboardButton("⛔ معتذرة", callback_data='absent')]
     ]
-    await update.message.reply_text("أهلاً بكِ! أنا بوت الحماية، اختر من القائمة:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(get_list_text(), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-# تنفيذ الأوامر المربوطة بالأزرار
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update, context):
     query = update.callback_query
-    await query.answer()
-    if query.data == 'admin':
-        await query.edit_message_text("هنا لوحة التحكم الخاصة بالمشرفات.")
-    elif query.data == 'help':
-        await query.edit_message_text("هذا البوت يقوم بحذف الروابط تلقائياً.")
-    elif query.data == 'settings':
-        await query.edit_message_text("لا توجد إعدادات إضافية حالياً.")
+    user = query.from_user.full_name
+    if query.data == 'read': students[user] = "قرأت"
+    elif query.data == 'listen': students[user] = "مستمعة"
+    elif query.data == 'absent': students[user] = "معتذرة"
+    
+    await query.edit_message_text(text=get_list_text(), reply_markup=query.message.reply_markup, parse_mode='Markdown')
+    await query.answer("تم تحديث حالتك!")
 
-# الحماية من الروابط
-async def filter_group_links(update, context):
-    message = update.effective_message
-    if message and any(entity.type in ['url', 'text_link'] for entity in (message.entities or [])):
-        await message.delete()
-        await context.bot.send_message(message.chat_id, "⚠️ تم حذف رابط لأن الروابط ممنوعة!")
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(button))
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start)) # يربط الأمر بالدالة
-    app.add_handler(CommandHandler("admin", start))
-    app.add_handler(CommandHandler("settings", start))
-    app.add_handler(CallbackQueryHandler(button_click))
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Entity("url"), filter_group_links))
-    app.run_polling()
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put(update)
+    return 'ok'
 
 if __name__ == '__main__':
-    main()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    app.run(host='0.0.0.0', port=PORT)
