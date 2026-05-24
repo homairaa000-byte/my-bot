@@ -1,58 +1,80 @@
 import os
 import sqlite3
-import re
-import asyncio
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
+# ====== CONFIG ======
 TOKEN = os.environ.get("BOT_TOKEN")
+BASE_URL = os.environ.get("BASE_URL")  # https://your-app.onrender.com
 PORT = int(os.environ.get("PORT", 10000))
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
+# ====== FLASK ======
 app = Flask(__name__)
+
+# ====== TELEGRAM APP ======
 application = Application.builder().token(TOKEN).build()
 
-conn = sqlite3.connect("students.db", check_same_thread=False)
+# ====== DB ======
+conn = sqlite3.connect("data.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked','false')")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    name TEXT,
+    status TEXT
+)
+""")
 conn.commit()
 
-def locked():
-    return cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == "true"
 
-async def is_admin(user_id, chat_id):
-    try:
-        admins = await application.bot.get_chat_administrators(chat_id)
-        return any(a.user.id == user_id for a in admins)
-    except:
-        return False
+# ====== HELPERS ======
+def is_admin_sync(user_id):
+    # مبسط (بدون async مشاكل)
+    ADMIN_IDS = os.environ.get("ADMIN_IDS", "")
+    return str(user_id) in ADMIN_IDS.split(",")
 
-def text():
-    cursor.execute("SELECT name,status FROM students")
-    data = cursor.fetchall()
 
-    out = "📚 قائمة التسجيل\n\n"
-    for key,title in [("register","تسجيل"),("read","قرأ"),("listen","استماع"),("excuse","اعتذار")]:
-        out += f"{title}:\n"
-        names = [n for n,s in data if s == key]
-        out += "\n".join(names) if names else "لا يوجد"
-        out += "\n\n"
+def main_text():
+    cursor.execute("SELECT name, status FROM users")
+    rows = cursor.fetchall()
 
-    return out
+    text = "📋 قائمة التسجيل\n\n"
 
-async def keyboard(update):
-    kb = [
-        [InlineKeyboardButton("تسجيل", callback_data="register")],
-        [InlineKeyboardButton("قرأ", callback_data="read"), InlineKeyboardButton("استماع", callback_data="listen")],
-        [InlineKeyboardButton("اعتذار", callback_data="excuse")]
-    ]
-    return InlineKeyboardMarkup(kb)
+    statuses = ["register", "read", "listen", "excuse"]
 
+    for st in statuses:
+        text += f"📌 {st}:\n"
+        for name, status in rows:
+            if status == st:
+                text += f"• {name}\n"
+        text += "\n"
+
+    return text
+
+
+def keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍ تسجيل", callback_data="register"),
+            InlineKeyboardButton("❌ حذف", callback_data="remove")
+        ],
+        [
+            InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            InlineKeyboardButton("🎧 مستمع", callback_data="listen")
+        ],
+        [
+            InlineKeyboardButton("⛔ اعتذار", callback_data="excuse")
+        ]
+    ])
+
+
+# ====== HANDLERS ======
 async def start(update, context):
-    await update.message.reply_text(text(), reply_markup=await keyboard(update))
+    await update.message.reply_text(main_text(), reply_markup=keyboard())
+
 
 async def buttons(update, context):
     q = update.callback_query
@@ -62,24 +84,50 @@ async def buttons(update, context):
     name = q.from_user.full_name
     data = q.data
 
-    if data in ["register","read","listen","excuse"]:
-        if locked() and not await is_admin(uid, q.message.chat.id):
-            await q.answer("التسجيل مغلق", show_alert=True)
-            return
-        cursor.execute("INSERT OR REPLACE INTO students VALUES (?,?,?)", (uid,name,data))
+    if data == "remove":
+        cursor.execute("DELETE FROM users WHERE user_id=?", (uid,))
+
+    elif data in ["register", "read", "listen", "excuse"]:
+        cursor.execute("""
+        INSERT OR REPLACE INTO users (user_id, name, status)
+        VALUES (?, ?, ?)
+        """, (uid, name, data))
 
     conn.commit()
-    await q.edit_message_text(text(), reply_markup=await keyboard(update))
 
-@app.route("/")
-def home():
-    return "BOT OK"
+    await q.edit_message_text(main_text(), reply_markup=keyboard())
 
-@app.route("/webhook", methods=["POST"])
+
+async def block_links(update, context):
+    text = update.message.text or ""
+    if "http" in text or "t.me" in text:
+        if not is_admin_sync(update.effective_user.id):
+            await update.message.delete()
+
+
+# ====== REGISTER HANDLERS ======
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(buttons))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
+
+
+# ====== WEBHOOK ======
+@app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    application.create_task(application.process_update(update))
     return "ok"
 
+
+# ====== START ======
 if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        await application.initialize()
+        await application.start()
+        await application.bot.set_webhook(f"{BASE_URL}{WEBHOOK_PATH}")
+
+    asyncio.run(main())
+
     app.run(host="0.0.0.0", port=PORT)
