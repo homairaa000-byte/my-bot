@@ -39,7 +39,7 @@ def get_all():
 
 registration_open = True
 
-# --- الواجهة ---
+# --- الواجهة (النصوص) ---
 def get_status():
     data = get_all()
     text = "السلام عليكم ورحمة الله وبركاته\n\n"
@@ -56,6 +56,7 @@ def get_status():
     text += "خذ الكتاب بقوة، واجعله من أولويات يومك، واقرأ تفسيره واعمل به، وأنت الرابح"
     return text
 
+# --- الأزرار ---
 def keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍ سجل إسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
@@ -92,16 +93,21 @@ async def buttons(update, context):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# --- الويب هوك مع معالجة الأخطاء ---
+# --- الويب هوك المصحح (تجنب خطأ 500) ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
+    json_data = request.get_json(force=True)
+    if not json_data:
+        return 'bad request', 400
     try:
-        json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
-        asyncio.run(application.process_update(update))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(application.process_update(update))
         return 'ok', 200
     except Exception as e:
-        return str(e), 500
+        print(f"Error: {e}")
+        return 'internal error', 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
