@@ -2,7 +2,6 @@ import os
 import sqlite3
 import re
 import asyncio
-import threading
 
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,7 +15,7 @@ from telegram.ext import (
 )
 
 # =========================
-# الإعدادات الأساسية
+# الإعدادات
 # =========================
 
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -83,6 +82,7 @@ def is_locked():
 
 
 def get_status_text():
+
     cursor.execute("SELECT name, status FROM students")
     data = cursor.fetchall()
 
@@ -103,16 +103,14 @@ def get_status_text():
     }
 
     for key, title in categories.items():
+
         text += f"{title}:\n"
 
         names = []
 
         for name, status in data:
             if status == key:
-                if key == "register":
-                    names.append(f"• {name}")
-                else:
-                    names.append(f"• {name}")
+                names.append(f"• {name}")
 
         text += "\n".join(names) if names else "لا يوجد"
         text += "\n\n"
@@ -135,17 +133,37 @@ def get_status_text():
 
 
 async def get_keyboard(update):
+
     keyboard = [
         [
-            InlineKeyboardButton("✍️ سجل إسمي", callback_data="register"),
-            InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")
+            InlineKeyboardButton(
+                "✍️ سجل إسمي",
+                callback_data="register"
+            ),
+
+            InlineKeyboardButton(
+                "❌ إحذف إسمي",
+                callback_data="remove"
+            )
         ],
+
         [
-            InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            InlineKeyboardButton("🎧 مستمعة", callback_data="listen")
+            InlineKeyboardButton(
+                "✅ قرأت",
+                callback_data="read"
+            ),
+
+            InlineKeyboardButton(
+                "🎧 مستمعة",
+                callback_data="listen"
+            )
         ],
+
         [
-            InlineKeyboardButton("⛔️ معتذرة", callback_data="excuse")
+            InlineKeyboardButton(
+                "⛔️ معتذرة",
+                callback_data="excuse"
+            )
         ]
     ]
 
@@ -153,6 +171,7 @@ async def get_keyboard(update):
         update.effective_user.id,
         update.effective_chat.id
     ):
+
         lock_text = (
             "🔓 فتح التسجيل"
             if is_locked()
@@ -160,17 +179,25 @@ async def get_keyboard(update):
         )
 
         keyboard.append([
-            InlineKeyboardButton(lock_text, callback_data="toggle"),
-            InlineKeyboardButton("🗑 تصفير القائمة", callback_data="clear")
+            InlineKeyboardButton(
+                lock_text,
+                callback_data="toggle"
+            ),
+
+            InlineKeyboardButton(
+                "🗑 تصفير القائمة",
+                callback_data="clear"
+            )
         ])
 
     return InlineKeyboardMarkup(keyboard)
 
 # =========================
-# الأوامر
+# أمر start
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     await update.message.reply_text(
         get_status_text(),
         reply_markup=await get_keyboard(update)
@@ -193,12 +220,14 @@ async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if has_link:
+
         admin = await is_admin(
             update.effective_user.id,
             update.effective_chat.id
         )
 
         if not admin:
+
             try:
                 await update.message.delete()
 
@@ -214,9 +243,13 @@ async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # الأزرار
 # =========================
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_buttons(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     query = update.callback_query
+
     await query.answer()
 
     uid = query.from_user.id
@@ -228,22 +261,29 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # حذف الاسم
     if data == "remove":
+
         cursor.execute(
             "DELETE FROM students WHERE user_id=?",
             (uid,)
         )
 
-    # قفل / فتح التسجيل
+    # قفل / فتح
     elif data == "toggle":
 
         if not admin:
+
             await query.answer(
                 "❌ ليس لديك صلاحية",
                 show_alert=True
             )
+
             return
 
-        new_value = "false" if is_locked() else "true"
+        new_value = (
+            "false"
+            if is_locked()
+            else "true"
+        )
 
         cursor.execute(
             "UPDATE settings SET value=? WHERE key='locked'",
@@ -254,22 +294,31 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "clear":
 
         if not admin:
+
             await query.answer(
                 "❌ ليس لديك صلاحية",
                 show_alert=True
             )
+
             return
 
         cursor.execute("DELETE FROM students")
 
     # تسجيل الحالات
-    elif data in ["register", "read", "listen", "excuse"]:
+    elif data in [
+        "register",
+        "read",
+        "listen",
+        "excuse"
+    ]:
 
         if is_locked() and not admin:
+
             await query.answer(
                 "🔒 التسجيل مغلق حالياً",
                 show_alert=True
             )
+
             return
 
         cursor.execute("""
@@ -289,7 +338,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ربط المعالجات
 # =========================
 
-application.add_handler(CommandHandler("start", start))
+application.add_handler(
+    CommandHandler("start", start)
+)
 
 application.add_handler(
     MessageHandler(
@@ -303,24 +354,34 @@ application.add_handler(
 )
 
 # =========================
-# الويب هوك
+# الصفحة الرئيسية
 # =========================
 
 @app.route("/")
 def home():
     return "Bot is running ✅"
 
+# =========================
+# الويب هوك
+# =========================
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
+
     update = Update.de_json(
         request.get_json(force=True),
         application.bot
     )
 
-    asyncio.run(application.process_update(update))
+    loop = asyncio.new_event_loop()
 
-    return "ok", 200
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(
+        application.process_update(update)
+    )
+
+    return 'ok', 200
 
 # =========================
 # تشغيل البوت
@@ -328,19 +389,16 @@ def webhook():
 
 async def setup():
     await application.initialize()
-    await application.start()
-
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(setup())
-    loop.run_forever()
 
 if __name__ == "__main__":
 
-    threading.Thread(target=run_bot).start()
+    loop = asyncio.new_event_loop()
+
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(setup())
 
     app.run(
         host="0.0.0.0",
         port=PORT
-    )
+        )
