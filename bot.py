@@ -4,18 +4,24 @@ import asyncio
 from datetime import datetime
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+)
 
-# ====== الإعدادات ======
+# ================== الإعدادات ==================
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
+BASE_URL = f"https://my-bot-pwus.onrender.com"
 
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
 
-# ====== قاعدة البيانات ======
+# ================== قاعدة البيانات ==================
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS students (
 user_id INTEGER PRIMARY KEY,
@@ -25,36 +31,44 @@ status TEXT
 """)
 conn.commit()
 
+
 def set_student(user_id, name, status):
-    cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)",
-                   (user_id, name, status))
+    cursor.execute(
+        "INSERT OR REPLACE INTO students VALUES (?, ?, ?)",
+        (user_id, name, status)
+    )
     conn.commit()
+
 
 def remove_student(user_id):
     cursor.execute("DELETE FROM students WHERE user_id=?", (user_id,))
     conn.commit()
 
+
 def clear_all():
     cursor.execute("DELETE FROM students")
     conn.commit()
+
 
 def get_all():
     cursor.execute("SELECT name, status FROM students")
     return cursor.fetchall()
 
+
 registration_open = True
 
-# ====== التحقق من الأدمن (الأهم هنا) ======
+# ================== صلاحيات الأدمن (تلقائي) ==================
 async def is_admin(update: Update):
     member = await update.effective_chat.get_member(update.effective_user.id)
     return member.status in ["administrator", "creator"]
 
-# ====== واجهة الحالة ======
+# ================== واجهة الحالة ==================
 def get_status():
     date_now = datetime.now().strftime("%Y-%m-%d")
     data = get_all()
 
-    text = f"""🤖 بوت الأكاديمية
+    text = f"""
+🤖 بوت الأكاديمية
 📅 {date_now}
 
 🔒 التسجيل: {'مفتوح ✅' if registration_open else 'مغلق ⛔'}
@@ -74,26 +88,31 @@ def get_status():
 
     return text
 
-# ====== /start ======
+
+# ================== /start ==================
 async def start(update, context):
-    kb = InlineKeyboardMarkup([
+    keyboard = [
         [
             InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            InlineKeyboardButton("🎧 مستمعة", callback_data="listen")
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listen"),
         ],
         [
             InlineKeyboardButton("🚫 معتذرة", callback_data="excuse"),
-            InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
+            InlineKeyboardButton("❌ حذف اسمي", callback_data="remove"),
         ],
         [
             InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
-            InlineKeyboardButton("🧹 تصفير", callback_data="clear")
+            InlineKeyboardButton("🧹 تصفير", callback_data="clear"),
         ],
-    ])
+    ]
 
-    await update.message.reply_text(get_status(), reply_markup=kb)
+    await update.message.reply_text(
+        get_status(),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-# ====== الأزرار ======
+
+# ================== الأزرار ==================
 async def buttons(update, context):
     global registration_open
 
@@ -106,8 +125,9 @@ async def buttons(update, context):
 
     admin = await is_admin(update)
 
-    if data in ["read", "listen", "excuse"] and registration_open:
-        set_student(uid, name, data)
+    if data in ["read", "listen", "excuse"]:
+        if registration_open:
+            set_student(uid, name, data)
 
     elif data == "remove":
         remove_student(uid)
@@ -129,13 +149,25 @@ async def buttons(update, context):
         reply_markup=query.message.reply_markup
     )
 
-# ====== Flask Webhook ======
+
+# ================== Flask Webhook ==================
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     asyncio.run(application.process_update(update))
     return "ok"
 
-# ====== تشغيل ======
+
+# ================== تشغيل البوت ==================
+async def setup():
+    await application.initialize()
+
+    # تسجيل Webhook تلقائي
+    await application.bot.set_webhook(
+        url=f"{BASE_URL}/{TOKEN}"
+    )
+
+
 if __name__ == "__main__":
+    asyncio.run(setup())
     app.run(host="0.0.0.0", port=PORT)
