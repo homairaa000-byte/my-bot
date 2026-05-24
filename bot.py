@@ -28,9 +28,7 @@ def get_main_keyboard():
         [InlineKeyboardButton("🚫 محظورات", callback_data="ban_list"), InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")]
     ])
 
-# --- النصوص ---
 def get_header():
-    # توقيت مكة المكرمة (توقيت السعودية)
     makkah_time = datetime.now().strftime('%Y-%m-%d')
     return f"السلام عليكم ورحمة الله وبركاته\n\n🤖 خادم القرآن الرقمي\n📅 {makkah_time}\n"
 
@@ -49,7 +47,6 @@ async def buttons(update, context):
     name = query.from_user.full_name
     data = query.data
     
-    # التحقق من الحظر
     cursor.execute("SELECT 1 FROM banned WHERE user_id=?", (uid,))
     if cursor.fetchone():
         await query.answer("عذراً، أنتِ محظورة من استخدام البوت.", show_alert=True)
@@ -64,9 +61,9 @@ async def buttons(update, context):
         conn.commit()
         await query.edit_message_text(f"{get_header()}\nتم حذف اسمكِ من القائمة.{get_footer()}", reply_markup=get_main_keyboard())
     elif data == "ban_list":
-        await query.answer("هذا الزر مخصص للمشرفات فقط لحظر الطالبات.", show_alert=True)
+        await query.answer("هذا الزر للمشرفات فقط. استخدمي الأمر /ban للرد على رسالة الطالبة للحظر.", show_alert=True)
 
-# أمر حظر طالبة (رد على رسالتها)
+# أمر الحظر أصبح بالإنجليزية الآن
 async def ban_command(update, context):
     if update.message.reply_to_message:
         target_id = update.message.reply_to_message.from_user.id
@@ -75,10 +72,9 @@ async def ban_command(update, context):
         await update.message.reply_text(f"تم حظر الطالبة بنجاح.")
 
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("حظر", ban_command))
+application.add_handler(CommandHandler("ban", ban_command))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# --- الويب هوك ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
