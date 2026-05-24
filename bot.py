@@ -4,14 +4,16 @@ import asyncio
 from flask import Flask, request
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-# الإعدادات من Render
+# الإعدادات
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
-ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "").split(","))) if os.environ.get("ADMIN_IDS") else []
+# تحويل معرفات المشرفين إلى قائمة أرقام صحيحة
+ADMIN_IDS = [int(id.strip()) for id in os.environ.get("ADMIN_IDS", "").split(",") if id.strip()]
 
 app = Flask(__name__)
+# إنشاء التطبيق بدون تشغيله فوراً (سيتم ربطه بالويب هوك)
 application = Application.builder().token(TOKEN).build()
 
 # قاعدة البيانات
@@ -20,7 +22,7 @@ cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
 conn.commit()
 
-# وظائف قاعدة البيانات
+# --- وظائف قاعدة البيانات ---
 def set_student(user_id, name, status):
     cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)", (user_id, name, status))
     conn.commit()
@@ -39,7 +41,7 @@ def get_all():
 
 registration_open = True
 
-# الواجهة
+# --- واجهة البوت ---
 def get_status():
     data = get_all()
     text = f"🤖 بوت الأكاديمية\n📅 {datetime.now().strftime('%Y-%m-%d')}\n\n🔒 التسجيل: {'مفتوح ✅' if registration_open else 'مغلق ⛔'}\n"
@@ -58,7 +60,7 @@ def keyboard():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"), InlineKeyboardButton("🧹 تصفير", callback_data="clear")],
     ])
 
-# الأوامر
+# --- الأوامر ---
 async def start(update, context):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
 
@@ -68,24 +70,34 @@ async def buttons(update, context):
     await query.answer()
     uid, name, data = query.from_user.id, query.from_user.full_name, query.data
     
-    if data in ["read", "listen", "excuse"] and registration_open:
-        set_student(uid, name, data)
+    if data in ["read", "listen", "excuse"]:
+        if registration_open:
+            set_student(uid, name, data)
+        else:
+            await query.answer("التسجيل مغلق حالياً!", show_alert=True)
     elif data == "remove":
         remove_student(uid)
-    elif data == "toggle" and uid in ADMIN_IDS:
-        registration_open = not registration_open
-    elif data == "clear" and uid in ADMIN_IDS:
-        clear_all()
-    else:
-        await query.answer("ليس لديك صلاحية أو التسجيل مغلق!", show_alert=True)
+    elif data in ["toggle", "clear"]:
+        if uid in ADMIN_IDS:
+            if data == "toggle": registration_open = not registration_open
+            if data == "clear": clear_all()
+        else:
+            await query.answer("هذا الزر للمشرفين فقط!", show_alert=True)
     
-    # تحديث الرسالة فوراً
     await query.edit_message_text(text=get_status(), reply_markup=keyboard())
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# الـ Webhook
+# --- الـ Webhook (الجزء المسؤول عن الاتصال بتليجرام) ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
+    if request.method == "POST":
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        # تشغيل المعالجة في الخلفية
+        asyncio.run(application.process_update(update))
+    return 'ok', 200
+
+if __name__ == '__main__':
+    # تشغيل تطبيق Flask
+    app.run(host='0.0.0.0', port=PORT)
