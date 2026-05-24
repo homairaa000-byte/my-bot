@@ -4,16 +4,15 @@ import asyncio
 import re
 from datetime import datetime
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-application = Application.builder().token(TOKEN).event_loop(loop).build()
+# إنشاء التطبيق بدون تعقيدات الـ loop
+application = Application.builder().token(TOKEN).build()
 
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -37,8 +36,8 @@ def get_status_text():
     banned_list = [row[0] for row in cursor.fetchall()]
     
     text = "السلام عليكم ورحمة الله وبركاته\n\nخادم القرآن الرقمي\n📋 قائمة تسجيل الأدوار\n\n"
-    
     cats = {"register": "✍️ المسجلات", "read": "✅ قرأت", "listen": "🎧 مستمعات", "excuse": "⛔️ معتذرات"}
+    
     for key, title in cats.items():
         text += f"{title}:\n"
         names = [f"• {n} ✅" if key == "register" and s == "read" else f"• {n}" for n, s in data if s == key]
@@ -56,50 +55,51 @@ async def get_keyboard(update, context):
         [InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")]
     ]
     if await is_admin(update, context):
-        status = "🔓 فتح" if cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == 'true' else "🔒 قفل"
+        locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == 'true'
+        status = "🔓 فتح التسجيل" if locked else "🔒 قفل التسجيل"
         kb.append([InlineKeyboardButton(status, callback_data="toggle"), InlineKeyboardButton("🗑 تصفير القائمة", callback_data="clear")])
     return InlineKeyboardMarkup(kb)
 
-# --- فلتر الروابط ---
 async def link_filter(update, context):
-    if not await is_admin(update, context):
-        if re.search(r'http[s]?://|www\.|t\.me/', update.message.text or ""):
-            await update.message.delete()
-            await update.message.reply_text("⛔️⛔️⛔️ إرسال روابط من دون الرجوع للإشراف يعرضك للحذف")
+    if not await is_admin(update, context) and re.search(r'http[s]?://|www\.|t\.me/', update.message.text or ""):
+        await update.message.delete()
+        await update.message.reply_text("⛔️⛔️⛔️ إرسال روابط من دون الرجوع للإشراف يعرضك للحذف")
 
-# --- الأزرار ---
+async def start(update, context):
+    await update.message.reply_text(get_status_text(), reply_markup=await get_keyboard(update, context))
+
 async def handle_buttons(update, context):
     query = update.callback_query
+    await query.answer()
     uid, name, data = query.from_user.id, query.from_user.full_name, query.data
     
     if data == "toggle":
-        new_val = 'false' if cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == 'true' else 'true'
-        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", (new_val,))
+        curr = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
+        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", ('false' if curr == 'true' else 'true',))
     elif data == "clear" and await is_admin(update, context):
         cursor.execute("DELETE FROM students")
     elif data == "remove":
         cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
     elif data in ["register", "read", "listen", "excuse"]:
-        # منع التسجيل إذا كان مغلقاً
         if cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == 'true' and not await is_admin(update, context):
             await query.answer("التسجيل مغلق حالياً!", show_alert=True)
             return
         cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)", (uid, name, data))
     
     conn.commit()
-    await query.answer()
     await query.edit_message_text(get_status_text(), reply_markup=await get_keyboard(update, context))
 
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
-application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text(get_status_text(), reply_markup=loop.run_until_complete(get_keyboard(u, c)))))
+application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(handle_buttons))
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    asyncio.run_coroutine_threadsafe(application.process_update(Update.de_json(request.get_json(force=True), application.bot)), loop)
+    # طريقة آمنة لتشغيل التحديثات في Flask
+    asyncio.run(application.process_update(Update.de_json(request.get_json(force=True), application.bot)))
     return 'ok', 200
 
 if __name__ == '__main__':
-    loop.run_until_complete(application.initialize())
-    loop.run_until_complete(application.start())
+    # تهيئة البوت ثم تشغيل Flask
+    asyncio.run(application.initialize())
     app.run(host='0.0.0.0', port=PORT)
