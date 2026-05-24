@@ -9,11 +9,11 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 # --- الإعدادات ---
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
-# تأكدي أن أرقام الـ ADMIN_IDS مفصولة بفاصلة فقط بدون مسافات
 ADMIN_IDS = [int(id.strip()) for id in os.environ.get("ADMIN_IDS", "").split(",") if id.strip()]
 
 app = Flask(__name__)
-# تهيئة التطبيق
+
+# تهيئة التطبيق خارج الدالة لضمان استقراره
 application = Application.builder().token(TOKEN).build()
 
 # --- قاعدة البيانات ---
@@ -22,7 +22,7 @@ cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
 conn.commit()
 
-# --- الوظائف ---
+# --- دوال المنطق ---
 def set_student(user_id, name, status):
     cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)", (user_id, name, status))
     conn.commit()
@@ -66,7 +66,7 @@ def keyboard():
         [InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data="toggle"), InlineKeyboardButton("🧹 تصفير القائمة", callback_data="clear")]
     ])
 
-# --- الأوامر ---
+# --- معالجة الأوامر ---
 async def start(update, context):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
 
@@ -94,20 +94,19 @@ async def buttons(update, context):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# --- الويب هوك المصحح لمنع خطأ 500 ---
+# --- دالة الويب هوك المعدلة (تجنب خطأ 500) ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
-        # إنشاء حلقة أحداث جديدة لكل طلب لضمان استقرار الاتصال
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(application.process_update(update))
+        # تشغيل التحديث بشكل غير متزامن داخل حلقة أحداث مخصصة
+        asyncio.run(application.process_update(update))
         return 'ok', 200
     except Exception as e:
         print(f"Error: {e}")
-        return 'error', 500
+        return 'internal server error', 500
 
 if __name__ == '__main__':
+    # تهيئة الـ Handlers قبل تشغيل التطبيق
     app.run(host='0.0.0.0', port=PORT)
