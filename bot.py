@@ -6,7 +6,6 @@ from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-# --- الإعدادات ---
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -17,45 +16,51 @@ application = Application.builder().token(TOKEN).build()
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY)") # جدول المحظورات
+cursor.execute("CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY)")
 conn.commit()
 
-def is_banned(user_id):
-    cursor.execute("SELECT 1 FROM banned WHERE user_id=?", (user_id,))
-    return cursor.fetchone() is not None
+# --- الأزرار بالتنسيق الجديد ---
+def get_main_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍ سجل إسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
+        [InlineKeyboardButton("🎧 مستمعات", callback_data="listen"), InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")],
+        [InlineKeyboardButton("🚫 محظورات", callback_data="ban_list"), InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")]
+    ])
 
 # --- معالجة الأوامر ---
 async def start(update, context):
-    if is_banned(update.message.from_user.id):
-        await update.message.reply_text("عذراً، أنت محظور من استخدام هذا البوت.")
-        return
-    await update.message.reply_text("أهلاً بك في خادم القرآن.")
+    await update.message.reply_text("أهلاً بك في خادم القرآن. اختاري إجراءً من القائمة:", reply_markup=get_main_keyboard())
 
-async def ban_user(update, context):
-    # مثال لأمر الحظر: /ban 123456
-    if context.args:
-        target_id = int(context.args[0])
-        cursor.execute("INSERT OR IGNORE INTO banned VALUES (?)", (target_id,))
+async def buttons(update, context):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    name = query.from_user.full_name
+    data = query.data
+    
+    if data in ["register", "read", "listen", "excuse"]:
+        cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)", (uid, name, data))
         conn.commit()
-        await update.message.reply_text(f"تم حظر المستخدم {target_id}")
+        await query.edit_message_text(f"تم تحديث حالتك إلى: {data}", reply_markup=get_main_keyboard())
+    elif data == "remove":
+        cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
+        conn.commit()
+        await query.edit_message_text("تم حذف اسمك من القائمة.", reply_markup=get_main_keyboard())
+    elif data == "ban_list":
+        await query.answer("قائمة المحظورات (فقط للإدارة)", show_alert=True)
 
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("ban", ban_user)) # أمر الحظر للإدارة
+application.add_handler(CallbackQueryHandler(buttons))
 
-# --- دالة الويب هوك ---
+# --- الويب هوك ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         json_data = request.get_json(force=True)
-        # التأكد أن المستخدم غير محظور قبل المعالجة
-        user_id = json_data.get('message', {}).get('from', {}).get('id')
-        if user_id and is_banned(user_id):
-            return 'banned', 200
-            
         update = Update.de_json(json_data, application.bot)
         asyncio.run(application.process_update(update))
         return 'ok', 200
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
         return 'error', 500
 
