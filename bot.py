@@ -2,12 +2,7 @@ import os
 import sqlite3
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # ======================
 # الإعدادات
@@ -19,13 +14,13 @@ PORT = int(os.environ.get("PORT", 10000))
 ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "").split(","))) if os.environ.get("ADMIN_IDS") else []
 
 # ======================
-# حماية التوكن
+# حماية الأخطاء
 # ======================
 if not TOKEN:
-    raise ValueError("BOT_TOKEN غير موجود في Environment Variables")
+    raise ValueError("❌ BOT_TOKEN غير موجود في Render Environment Variables")
 
 if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL غير موجود في Environment Variables")
+    raise ValueError("❌ WEBHOOK_URL غير موجود في Render Environment Variables")
 
 # ======================
 # قاعدة البيانات
@@ -42,7 +37,9 @@ CREATE TABLE IF NOT EXISTS students (
 """)
 conn.commit()
 
-
+# ======================
+# وظائف قاعدة البيانات
+# ======================
 def set_student(user_id, name, status):
     cursor.execute("""
     INSERT INTO students (user_id, name, status)
@@ -68,7 +65,6 @@ def get_all():
     cursor.execute("SELECT name, status FROM students")
     return cursor.fetchall()
 
-
 # ======================
 # حالة التسجيل
 # ======================
@@ -77,7 +73,6 @@ registration_open = True
 
 def is_admin(user_id: int):
     return user_id in ADMIN_IDS
-
 
 # ======================
 # لوحة الأزرار
@@ -98,10 +93,11 @@ def keyboard():
         ],
     ])
 
-
+# ======================
+# عرض الحالة
+# ======================
 def get_status():
     date_now = datetime.now().strftime("%Y-%m-%d")
-
     data = get_all()
 
     text = f"""🤖 بوت الأكاديمية
@@ -127,13 +123,11 @@ def get_status():
     text += "\n-----------------------\n📚 استمر في التعلم"
     return text
 
-
 # ======================
 # /start
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
-
 
 # ======================
 # الأزرار
@@ -164,32 +158,3 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "clear":
         if is_admin(user_id):
             clear_all()
-        else:
-            await query.answer("خاص بالمشرفين فقط", show_alert=True)
-
-    await query.edit_message_text(get_status(), reply_markup=keyboard())
-
-
-# ======================
-# تشغيل Webhook
-# ======================
-async def post_init(app: Application):
-    await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-
-
-def main():
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(buttons))
-
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="webhook",
-        webhook_url=f"{WEBHOOK_URL}/webhook"
-    )
-
-
-if __name__ == "__main__":
-    main()
