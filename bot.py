@@ -10,13 +10,24 @@ from telegram.ext import (
 )
 
 # ======================
-# إعدادات
+# إعدادات آمنة
 # ======================
 TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # مثال: https://your-app.onrender.com
-ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "").split(",")))
-
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 10000))
+
+# 🔥 حماية من خطأ ADMIN_IDS الفارغ
+raw_admins = os.environ.get("ADMIN_IDS", "")
+ADMIN_IDS = list(map(int, raw_admins.split(","))) if raw_admins.strip() else []
+
+# ======================
+# تحقق من الإعدادات
+# ======================
+if not TOKEN:
+    raise ValueError("BOT_TOKEN is missing in environment variables")
+
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL is missing in environment variables")
 
 # ======================
 # قاعدة البيانات
@@ -33,9 +44,8 @@ CREATE TABLE IF NOT EXISTS students (
 """)
 conn.commit()
 
-
 # ======================
-# أدوات DB
+# أدوات قاعدة البيانات
 # ======================
 def set_student(user_id, name, status):
     cursor.execute("""
@@ -64,7 +74,7 @@ def get_all():
 
 
 # ======================
-# الحالة العامة
+# حالة التسجيل
 # ======================
 registration_open = True
 
@@ -98,7 +108,6 @@ def is_admin(user_id: int):
 # ======================
 def get_status():
     date_now = datetime.now().strftime("%Y-%m-%d")
-
     data = get_all()
 
     text = f"""
@@ -123,7 +132,7 @@ def get_status():
 
 
 # ======================
-# أوامر
+# /start
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
@@ -163,11 +172,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.answer("خاص بالمشرفين فقط", show_alert=True)
 
+    # تحديث الرسالة
     await query.edit_message_text(get_status(), reply_markup=keyboard())
 
 
 # ======================
-# تشغيل Webhook
+# تشغيل Webhook (Render)
 # ======================
 async def post_init(app: Application):
     await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
