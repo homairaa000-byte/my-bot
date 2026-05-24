@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from datetime import datetime
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -12,22 +13,14 @@ from telegram.ext import (
 # ======================
 # إعدادات آمنة
 # ======================
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-PORT = int(os.environ.get("PORT", 10000))
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "0").split(",")))
 
-# 🔥 حماية من خطأ ADMIN_IDS الفارغ
-raw_admins = os.environ.get("ADMIN_IDS", "")
-ADMIN_IDS = list(map(int, raw_admins.split(","))) if raw_admins.strip() else []
+PORT = int(os.getenv("PORT", 10000))
 
-# ======================
-# تحقق من الإعدادات
-# ======================
 if not TOKEN:
-    raise ValueError("BOT_TOKEN is missing in environment variables")
-
-if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL is missing in environment variables")
+    raise ValueError("BOT_TOKEN غير موجود في Environment Variables")
 
 # ======================
 # قاعدة البيانات
@@ -44,9 +37,6 @@ CREATE TABLE IF NOT EXISTS students (
 """)
 conn.commit()
 
-# ======================
-# أدوات قاعدة البيانات
-# ======================
 def set_student(user_id, name, status):
     cursor.execute("""
     INSERT INTO students (user_id, name, status)
@@ -57,27 +47,22 @@ def set_student(user_id, name, status):
     """, (user_id, name, status))
     conn.commit()
 
-
 def remove_student(user_id):
     cursor.execute("DELETE FROM students WHERE user_id=?", (user_id,))
     conn.commit()
-
 
 def clear_all():
     cursor.execute("DELETE FROM students")
     conn.commit()
 
-
 def get_all():
     cursor.execute("SELECT name, status FROM students")
     return cursor.fetchall()
-
 
 # ======================
 # حالة التسجيل
 # ======================
 registration_open = True
-
 
 # ======================
 # لوحة الأزرار
@@ -98,16 +83,15 @@ def keyboard():
         ],
     ])
 
-
 def is_admin(user_id: int):
     return user_id in ADMIN_IDS
-
 
 # ======================
 # عرض الحالة
 # ======================
 def get_status():
     date_now = datetime.now().strftime("%Y-%m-%d")
+
     data = get_all()
 
     text = f"""
@@ -130,13 +114,11 @@ def get_status():
     text += "\n-----------------------\n📖 استمر في التعلم"
     return text
 
-
 # ======================
-# /start
+# start
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
-
 
 # ======================
 # الأزرار
@@ -151,7 +133,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = query.from_user.full_name
     data = query.data
 
-    # تسجيل الحالات
     if data in ["read", "listen", "excuse"]:
         if registration_open:
             set_student(user_id, name, data)
@@ -159,7 +140,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "remove":
         remove_student(user_id)
 
-    # أوامر الأدمن
     elif data == "toggle":
         if is_admin(user_id):
             registration_open = not registration_open
@@ -172,17 +152,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.answer("خاص بالمشرفين فقط", show_alert=True)
 
-    # تحديث الرسالة
     await query.edit_message_text(get_status(), reply_markup=keyboard())
 
-
 # ======================
-# تشغيل Webhook (Render)
+# webhook setup
 # ======================
 async def post_init(app: Application):
-    await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
+    if WEBHOOK_URL:
+        await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
 
-
+# ======================
+# تشغيل البوت
+# ======================
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
@@ -194,7 +175,6 @@ def main():
         port=PORT,
         url_path="webhook",
     )
-
 
 if __name__ == "__main__":
     main()
