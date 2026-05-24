@@ -10,7 +10,10 @@ TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
-application = Application.builder().token(TOKEN).build()
+# إنشاء الـ Application وإدارة الـ event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+application = Application.builder().token(TOKEN).event_loop(loop).build()
 
 # قاعدة البيانات
 conn = sqlite3.connect("students.db", check_same_thread=False)
@@ -44,7 +47,6 @@ def get_status_text():
     text += f"\n🎧 مستمعات:\n" + "\n".join([f"• {n}" for n, s in data if s == "listen"])
     text += f"\n\n⛔️ معتذرات:\n" + "\n".join([f"• {n}" for n, s in data if s == "excuse"])
     text += f"\n\n🚫 المحظورات:\n" + "\n".join([f"• {n}" for n in banned_list])
-    
     text += "\n\nخذ الكتاب بقوة، واجعله من أولويات يومك، واقرأ تفسيره واعمل به، وأنت الرابح"
     return text
 
@@ -88,10 +90,11 @@ application.add_handler(CallbackQueryHandler(handle_buttons))
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    asyncio.run(application.process_update(Update.de_json(request.get_json(force=True), application.bot)))
+    # استخدام threadsafe لضمان عدم إغلاق الـ loop
+    asyncio.run_coroutine_threadsafe(application.process_update(Update.de_json(request.get_json(force=True), application.bot)), loop)
     return 'ok', 200
 
 if __name__ == '__main__':
-    asyncio.run(application.initialize())
-    asyncio.run(application.start())
+    loop.run_until_complete(application.initialize())
+    loop.run_until_complete(application.start())
     app.run(host='0.0.0.0', port=PORT)
