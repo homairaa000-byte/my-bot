@@ -2,9 +2,12 @@ import os
 import sqlite3
 import re
 import asyncio
-
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -41,13 +44,6 @@ CREATE TABLE IF NOT EXISTS students (
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS banned (
-    user_id INTEGER PRIMARY KEY,
-    name TEXT
-)
-""")
-
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -62,7 +58,7 @@ VALUES ('locked', 'false')
 conn.commit()
 
 # =========================
-# دوال مساعدة
+# الدوال
 # =========================
 
 async def is_admin(user_id, chat_id):
@@ -73,27 +69,25 @@ async def is_admin(user_id, chat_id):
         return False
 
 
-def is_locked():
+def registration_locked():
     result = cursor.execute(
         "SELECT value FROM settings WHERE key='locked'"
     ).fetchone()
 
-    return result and result[0] == "true"
+    return result[0] == "true"
 
 
 def get_status_text():
-
     cursor.execute("SELECT name, status FROM students")
     data = cursor.fetchall()
 
-    cursor.execute("SELECT name FROM banned")
-    banned_list = [row[0] for row in cursor.fetchall()]
+    text = """
+السلام عليكم ورحمة الله وبركاته 🌸
 
-    text = (
-        "🌸 السلام عليكم ورحمة الله وبركاته 🌸\n\n"
-        "📚 خادم القرآن الرقمي\n"
-        "📋 قائمة تسجيل الأدوار\n\n"
-    )
+📚 خادم القرآن الرقمي
+━━━━━━━━━━━━━━
+
+"""
 
     categories = {
         "register": "✍️ المسجلات",
@@ -106,28 +100,24 @@ def get_status_text():
 
         text += f"{title}:\n"
 
-        names = []
+        names = [n for n, s in data if s == key]
 
-        for name, status in data:
-            if status == key:
-                names.append(f"• {name}")
+        if names:
+            for name in names:
+                text += f"• {name}\n"
+        else:
+            text += "لا يوجد\n"
 
-        text += "\n".join(names) if names else "لا يوجد"
-        text += "\n\n"
+        text += "\n"
 
-    text += "🚫 المحظورات:\n"
+    text += "━━━━━━━━━━━━━━\n"
 
-    if banned_list:
-        text += "\n".join([f"• {name}" for name in banned_list])
+    if registration_locked():
+        text += "🔒 التسجيل مغلق حالياً\n"
     else:
-        text += "لا يوجد"
+        text += "🔓 التسجيل مفتوح\n"
 
-    text += (
-        "\n\n"
-        "📖 خذِ الكتاب بقوة، واجعليه من أولويات يومك\n"
-        "📚 واقرئي تفسيره واعملي به، وأنتِ الرابحة بإذن الله\n\n"
-        "🌸 السلام عليكم ورحمة الله وبركاته 🌸"
-    )
+    text += "\n🌷 بارك الله فيكن"
 
     return text
 
@@ -140,25 +130,21 @@ async def get_keyboard(update):
                 "✍️ سجل إسمي",
                 callback_data="register"
             ),
-
             InlineKeyboardButton(
-                "❌ إحذف إسمي",
+                "❌ حذف إسمي",
                 callback_data="remove"
             )
         ],
-
         [
             InlineKeyboardButton(
                 "✅ قرأت",
                 callback_data="read"
             ),
-
             InlineKeyboardButton(
                 "🎧 مستمعة",
                 callback_data="listen"
             )
         ],
-
         [
             InlineKeyboardButton(
                 "⛔️ معتذرة",
@@ -172,20 +158,18 @@ async def get_keyboard(update):
         update.effective_chat.id
     ):
 
-        lock_text = (
-            "🔓 فتح التسجيل"
-            if is_locked()
-            else "🔒 قفل التسجيل"
-        )
+        if registration_locked():
+            lock_text = "🔓 فتح التسجيل"
+        else:
+            lock_text = "🔒 قفل التسجيل"
 
         keyboard.append([
             InlineKeyboardButton(
                 lock_text,
                 callback_data="toggle"
             ),
-
             InlineKeyboardButton(
-                "🗑 تصفير القائمة",
+                "🗑 تصفير",
                 callback_data="clear"
             )
         ])
@@ -193,7 +177,7 @@ async def get_keyboard(update):
     return InlineKeyboardMarkup(keyboard)
 
 # =========================
-# أمر start
+# الأوامر
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,129 +187,63 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=await get_keyboard(update)
     )
 
-# =========================
-# حذف الروابط
-# =========================
 
-async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not update.message:
-        return
-
-    text = update.message.text or ""
-
-    has_link = re.search(
-        r"(https?://|www\.|t\.me/)",
-        text
-    )
-
-    if has_link:
-
-        admin = await is_admin(
-            update.effective_user.id,
-            update.effective_chat.id
-        )
-
-        if not admin:
-
-            try:
-                await update.message.delete()
-
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text="⛔️ يمنع إرسال الروابط بدون إذن من الإشراف"
-                )
-
-            except:
-                pass
-
-# =========================
-# الأزرار
-# =========================
-
-async def handle_buttons(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
     await query.answer()
 
-    uid = query.from_user.id
+    user_id = query.from_user.id
     name = query.from_user.full_name
     data = query.data
-    chat_id = query.message.chat.id
-
-    admin = await is_admin(uid, chat_id)
 
     # حذف الاسم
     if data == "remove":
 
         cursor.execute(
             "DELETE FROM students WHERE user_id=?",
-            (uid,)
+            (user_id,)
         )
 
-    # قفل / فتح
+    # قفل أو فتح
     elif data == "toggle":
 
-        if not admin:
-
-            await query.answer(
-                "❌ ليس لديك صلاحية",
-                show_alert=True
-            )
-
+        if not await is_admin(user_id, query.message.chat.id):
             return
 
-        new_value = (
-            "false"
-            if is_locked()
-            else "true"
-        )
+        current = registration_locked()
 
         cursor.execute(
             "UPDATE settings SET value=? WHERE key='locked'",
-            (new_value,)
+            ("false" if current else "true",)
         )
 
-    # تصفير القائمة
+    # تصفير
     elif data == "clear":
 
-        if not admin:
-
-            await query.answer(
-                "❌ ليس لديك صلاحية",
-                show_alert=True
-            )
-
+        if not await is_admin(user_id, query.message.chat.id):
             return
 
         cursor.execute("DELETE FROM students")
 
-    # تسجيل الحالات
-    elif data in [
-        "register",
-        "read",
-        "listen",
-        "excuse"
-    ]:
+    # التسجيل
+    elif data in ["register", "read", "listen", "excuse"]:
 
-        if is_locked() and not admin:
+        if registration_locked():
 
-            await query.answer(
-                "🔒 التسجيل مغلق حالياً",
-                show_alert=True
-            )
+            if not await is_admin(user_id, query.message.chat.id):
 
-            return
+                await query.answer(
+                    "⛔️ التسجيل مغلق",
+                    show_alert=True
+                )
+                return
 
-        cursor.execute("""
-        INSERT OR REPLACE INTO students
-        (user_id, name, status)
-        VALUES (?, ?, ?)
-        """, (uid, name, data))
+        cursor.execute(
+            "INSERT OR REPLACE INTO students VALUES (?, ?, ?)",
+            (user_id, name, data)
+        )
 
     conn.commit()
 
@@ -333,6 +251,29 @@ async def handle_buttons(
         text=get_status_text(),
         reply_markup=await get_keyboard(update)
     )
+
+
+# =========================
+# حذف الروابط
+# =========================
+
+async def delete_links(update, context):
+
+    if await is_admin(
+        update.effective_user.id,
+        update.effective_chat.id
+    ):
+        return
+
+    text = update.message.text or ""
+
+    if re.search(r"(https?://|t\.me|www\.)", text):
+
+        await update.message.delete()
+
+        await update.message.reply_text(
+            "⛔️ يمنع إرسال الروابط"
+        )
 
 # =========================
 # ربط المعالجات
@@ -343,14 +284,14 @@ application.add_handler(
 )
 
 application.add_handler(
-    MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        link_filter
-    )
+    CallbackQueryHandler(buttons)
 )
 
 application.add_handler(
-    CallbackQueryHandler(handle_buttons)
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        delete_links
+    )
 )
 
 # =========================
@@ -359,13 +300,13 @@ application.add_handler(
 
 @app.route("/")
 def home():
-    return "Bot is running ✅"
+    return "BOT IS RUNNING"
 
 # =========================
-# الويب هوك
+# WEBHOOK
 # =========================
 
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
 
     update = Update.de_json(
@@ -373,30 +314,17 @@ def webhook():
         application.bot
     )
 
-    loop = asyncio.new_event_loop()
+    asyncio.run(application.process_update(update))
 
-    asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(
-        application.process_update(update)
-    )
-
-    return 'ok', 200
+    return "ok"
 
 # =========================
-# تشغيل البوت
+# التشغيل
 # =========================
-
-async def setup():
-    await application.initialize()
 
 if __name__ == "__main__":
 
-    loop = asyncio.new_event_loop()
-
-    asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(setup())
+    asyncio.run(application.initialize())
 
     app.run(
         host="0.0.0.0",
