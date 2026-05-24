@@ -1,139 +1,190 @@
 import os
+import sqlite3
 from datetime import datetime
-from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
-import asyncio
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
+# ======================
+# إعدادات
+# ======================
 TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # مثال: https://your-app.onrender.com
+ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "").split(",")))
 
 PORT = int(os.environ.get("PORT", 10000))
 
-app = Flask(__name__)
+# ======================
+# قاعدة البيانات
+# ======================
+conn = sqlite3.connect("students.db", check_same_thread=False)
+cursor = conn.cursor()
 
-application = Application.builder().token(TOKEN).build()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS students (
+    user_id INTEGER PRIMARY KEY,
+    name TEXT,
+    status TEXT
+)
+""")
+conn.commit()
 
-students = {
-    "قرأت": [],
-    "مستمعة": [],
-    "معتذرة": [],
-    "محظورات": []
-}
 
+# ======================
+# أدوات DB
+# ======================
+def set_student(user_id, name, status):
+    cursor.execute("""
+    INSERT INTO students (user_id, name, status)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+    name=excluded.name,
+    status=excluded.status
+    """, (user_id, name, status))
+    conn.commit()
+
+
+def remove_student(user_id):
+    cursor.execute("DELETE FROM students WHERE user_id=?", (user_id,))
+    conn.commit()
+
+
+def clear_all():
+    cursor.execute("DELETE FROM students")
+    conn.commit()
+
+
+def get_all():
+    cursor.execute("SELECT name, status FROM students")
+    return cursor.fetchall()
+
+
+# ======================
+# الحالة العامة
+# ======================
 registration_open = True
 
 
+# ======================
+# لوحة الأزرار
+# ======================
+def keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listen"),
+        ],
+        [
+            InlineKeyboardButton("🚫 معتذرة", callback_data="excuse"),
+            InlineKeyboardButton("❌ حذف اسمي", callback_data="remove"),
+        ],
+        [
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
+            InlineKeyboardButton("🧹 تصفير", callback_data="clear"),
+        ],
+    ])
+
+
+def is_admin(user_id: int):
+    return user_id in ADMIN_IDS
+
+
+# ======================
+# عرض الحالة
+# ======================
 def get_status():
-    date_now = datetime.now().strftime("%Y / %m / %d")
+    date_now = datetime.now().strftime("%Y-%m-%d")
 
-    status = "مفتوح ✅" if registration_open else "مغلق ⛔"
+    data = get_all()
 
-    text = (
-        "السلام عليكم ورحمة الله وبركاته\n\n"
-        "🤖 مساعد الأكاديمية\n"
-        f"📅 التاريخ: {date_now}\n"
-        "---------------------------\n"
-        f"🔒 حالة التسجيل: {status}\n"
-    )
+    text = f"""
+🤖 مساعد الأكاديمية
+📅 التاريخ: {date_now}
 
-    for cat, names in students.items():
-        text += f"\n{cat}:\n"
-        text += "\n".join([f"• {n}" for n in names]) if names else "لا يوجد"
+🔒 التسجيل: {'مفتوح ✅' if registration_open else 'مغلق ⛔'}
+
+-----------------------
+"""
+
+    categories = {"read": "قرأت", "listen": "مستمعة", "excuse": "معتذرة"}
+
+    for key, title in categories.items():
+        text += f"\n{title}:\n"
+        items = [n for n, s in data if s == key]
+        text += "\n".join([f"• {i}" for i in items]) if items else "لا يوجد"
         text += "\n"
 
+    text += "\n-----------------------\n📖 استمر في التعلم"
     return text
 
 
-async def start(update, context):
-    keyboard = [
-        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
-         InlineKeyboardButton("🎧 مستمعة", callback_data="listen")],
-
-        [InlineKeyboardButton("🚫 معتذرة", callback_data="excuse"),
-         InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")],
-
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
-         InlineKeyboardButton("🧹 تصفير", callback_data="clear")],
-
-        [InlineKeyboardButton("🚫 حظر طالبة", callback_data="ban")]
-    ]
-
-    await update.message.reply_text(
-        get_status(),
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+# ======================
+# أوامر
+# ======================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(get_status(), reply_markup=keyboard())
 
 
-async def buttons(update, context):
+# ======================
+# الأزرار
+# ======================
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
 
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user.full_name
+    user_id = query.from_user.id
+    name = query.from_user.full_name
     data = query.data
 
-    if user in students["محظورات"]:
-        await query.answer("أنتِ محظورة من النظام!", show_alert=True)
-        return
-
-    if data in ["read", "listen", "excuse"] and registration_open:
-
-        for cat in students:
-            if user in students[cat]:
-                students[cat].remove(user)
-
-        if data == "read":
-            students["قرأت"].append(user)
-        elif data == "listen":
-            students["مستمعة"].append(user)
-        elif data == "excuse":
-            students["معتذرة"].append(user)
+    # تسجيل الحالات
+    if data in ["read", "listen", "excuse"]:
+        if registration_open:
+            set_student(user_id, name, data)
 
     elif data == "remove":
-        for cat in students:
-            if user in students[cat]:
-                students[cat].remove(user)
+        remove_student(user_id)
 
+    # أوامر الأدمن
     elif data == "toggle":
-        registration_open = not registration_open
+        if is_admin(user_id):
+            registration_open = not registration_open
+        else:
+            await query.answer("خاص بالمشرفين فقط", show_alert=True)
 
     elif data == "clear":
-        for cat in students:
-            if cat != "محظورات":
-                students[cat] = []
+        if is_admin(user_id):
+            clear_all()
+        else:
+            await query.answer("خاص بالمشرفين فقط", show_alert=True)
 
-    elif data == "ban":
-        await query.message.reply_text("ردي بكلمة 'حظر' على اسم الطالبة")
-
-    await query.edit_message_text(get_status())
+    await query.edit_message_text(get_status(), reply_markup=keyboard())
 
 
-@app.route(f"/webhook", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
-    return "ok"
+# ======================
+# تشغيل Webhook
+# ======================
+async def post_init(app: Application):
+    await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
 
 
-@app.route("/")
-def home():
-    return "Bot is running!"
+def main():
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(buttons))
 
-async def setup():
-    await application.initialize()
-    await application.bot.set_webhook(
-        url=f"{WEBHOOK_URL}/webhook"
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="webhook",
     )
 
 
 if __name__ == "__main__":
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(buttons))
-
-    asyncio.run(setup())
-
-    app.run(host="0.0.0.0", port=PORT)
+    main()
