@@ -1,7 +1,6 @@
 import os
 import sqlite3
 import asyncio
-import traceback
 from datetime import datetime
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,77 +12,84 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
 
-# --- قاعدة البيانات ---
+# قاعدة البيانات
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY)")
 conn.commit()
 
-# --- الأزرار ---
-def get_main_keyboard():
-    return InlineKeyboardMarkup([
+# دالة التحقق مما إذا كان المستخدم مشرفاً
+async def is_user_admin(update, context):
+    user_id = update.callback_query.from_user.id
+    chat_id = update.callback_query.message.chat.id
+    try:
+        admins = await context.bot.get_chat_administrators(chat_id)
+        return any(admin.user.id == user_id for admin in admins)
+    except:
+        return False
+
+def get_status_text():
+    cursor.execute("SELECT name, status FROM students")
+    data = cursor.fetchall()
+    date = datetime.now().strftime('%Y-%m-%d')
+    text = f"خادم القرآن الرقمي\n📋 قائمة تسجيل الأدوار\n📅 {date}\n\n"
+    
+    cats = {"register": "✍️ المسجلات", "read": "✅ قرأت", "listen": "🎧 مستمعات", "excuse": "⛔️ معتذرات"}
+    for key, title in cats.items():
+        text += f"{title}:\n"
+        names = [n for n, s in data if s == key]
+        text += "\n".join([f"• {n}" for n in names]) if names else "لا يوجد"
+        text += "\n\n"
+    text += "خذ الكتاب بقوة، واجعله من أولويات يومك، واقرأ تفسيره واعمل به، وأنت الرابح"
+    return text
+
+# دالة بناء الأزرار (تستقبل context للتحقق من المشرف)
+async def get_keyboard(update, context):
+    kb = [
         [InlineKeyboardButton("✍ سجل إسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
         [InlineKeyboardButton("🎧 مستمعات", callback_data="listen"), InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")],
         [InlineKeyboardButton("🚫 محظورات", callback_data="ban_list"), InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")]
-    ])
-
-def get_header():
-    makkah_time = datetime.now().strftime('%Y-%m-%d')
-    return f"السلام عليكم ورحمة الله وبركاته\n\n🤖 خادم القرآن الرقمي\n📅 {makkah_time}\n"
-
-def get_footer():
-    return "\nخذ الكتاب بقوة، واجعله من أولويات يومك، واقرأ تفسيره واعمل به، وأنت الرابح"
+    ]
+    
+    # تحقق تلقائي من صلاحية المشرف
+    if await is_user_admin(update, context):
+        kb.append([InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"), InlineKeyboardButton("🗑 تصفير القائمة", callback_data="clear")])
+    
+    return InlineKeyboardMarkup(kb)
 
 # --- الأوامر ---
 async def start(update, context):
-    text = f"{get_header()}\nأهلاً بكِ في خادم القرآن الرقمي. اختاري إجراءً من القائمة:{get_footer()}"
-    await update.message.reply_text(text, reply_markup=get_main_keyboard())
+    # عند استخدام الأمر /start في البداية نعتبر المستخدم العادي هو الظاهر
+    await update.message.reply_text(get_status_text(), reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍ سجل إسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
+        [InlineKeyboardButton("🎧 مستمعات", callback_data="listen"), InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")],
+        [InlineKeyboardButton("🚫 محظورات", callback_data="ban_list"), InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")]
+    ]))
 
 async def buttons(update, context):
     query = update.callback_query
     await query.answer()
-    uid = query.from_user.id
-    name = query.from_user.full_name
-    data = query.data
+    uid, name, data = query.from_user.id, query.from_user.full_name, query.data
     
-    cursor.execute("SELECT 1 FROM banned WHERE user_id=?", (uid,))
-    if cursor.fetchone():
-        await query.answer("عذراً، أنتِ محظورة من استخدام البوت.", show_alert=True)
-        return
-
     if data in ["register", "read", "listen", "excuse"]:
         cursor.execute("INSERT OR REPLACE INTO students VALUES (?, ?, ?)", (uid, name, data))
-        conn.commit()
-        await query.edit_message_text(f"{get_header()}\nتم تحديث حالتكِ إلى: {data}{get_footer()}", reply_markup=get_main_keyboard())
     elif data == "remove":
         cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
-        conn.commit()
-        await query.edit_message_text(f"{get_header()}\nتم حذف اسمكِ من القائمة.{get_footer()}", reply_markup=get_main_keyboard())
-    elif data == "ban_list":
-        await query.answer("هذا الزر للمشرفات فقط. استخدمي الأمر /ban للرد على رسالة الطالبة للحظر.", show_alert=True)
-
-# أمر الحظر أصبح بالإنجليزية الآن
-async def ban_command(update, context):
-    if update.message.reply_to_message:
-        target_id = update.message.reply_to_message.from_user.id
-        cursor.execute("INSERT OR IGNORE INTO banned VALUES (?)", (target_id,))
-        conn.commit()
-        await update.message.reply_text(f"تم حظر الطالبة بنجاح.")
+    elif data == "clear" and await is_user_admin(update, context):
+        cursor.execute("DELETE FROM students")
+    conn.commit()
+    
+    await query.edit_message_text(get_status_text(), reply_markup=await get_keyboard(update, context))
 
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("ban", ban_command))
 application.add_handler(CallbackQueryHandler(buttons))
 
-@app.route(f'/{TOKEN}', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, application.bot)
-        asyncio.run(application.process_update(update))
-        return 'ok', 200
-    except Exception:
-        return 'error', 500
+    json_data = request.get_json(force=True)
+    update = Update.de_json(json_data, application.bot)
+    asyncio.run(application.process_update(update))
+    return 'ok', 200
 
 async def init_bot():
     await application.initialize()
