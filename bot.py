@@ -9,9 +9,11 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 # --- الإعدادات ---
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
+# تأكدي أن أرقام الـ ADMIN_IDS مفصولة بفاصلة فقط بدون مسافات
 ADMIN_IDS = [int(id.strip()) for id in os.environ.get("ADMIN_IDS", "").split(",") if id.strip()]
 
 app = Flask(__name__)
+# تهيئة التطبيق
 application = Application.builder().token(TOKEN).build()
 
 # --- قاعدة البيانات ---
@@ -39,7 +41,7 @@ def get_all():
 
 registration_open = True
 
-# --- الواجهة (النصوص) ---
+# --- واجهة البوت ---
 def get_status():
     data = get_all()
     text = "السلام عليكم ورحمة الله وبركاته\n\n"
@@ -56,7 +58,6 @@ def get_status():
     text += "خذ الكتاب بقوة، واجعله من أولويات يومك، واقرأ تفسيره واعمل به، وأنت الرابح"
     return text
 
-# --- الأزرار ---
 def keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍ سجل إسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
@@ -93,21 +94,20 @@ async def buttons(update, context):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# --- الويب هوك المصحح (تجنب خطأ 500) ---
+# --- الويب هوك المصحح لمنع خطأ 500 ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    json_data = request.get_json(force=True)
-    if not json_data:
-        return 'bad request', 400
     try:
+        json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
+        # إنشاء حلقة أحداث جديدة لكل طلب لضمان استقرار الاتصال
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(application.process_update(update))
         return 'ok', 200
     except Exception as e:
         print(f"Error: {e}")
-        return 'internal error', 500
+        return 'error', 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
