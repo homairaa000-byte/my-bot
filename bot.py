@@ -1,7 +1,6 @@
 import os
 import sqlite3
 from datetime import datetime
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -11,16 +10,22 @@ from telegram.ext import (
 )
 
 # ======================
-# إعدادات آمنة
+# الإعدادات
 # ======================
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "0").split(",")))
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+PORT = int(os.environ.get("PORT", 10000))
 
-PORT = int(os.getenv("PORT", 10000))
+ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "").split(","))) if os.environ.get("ADMIN_IDS") else []
 
+# ======================
+# حماية التوكن
+# ======================
 if not TOKEN:
     raise ValueError("BOT_TOKEN غير موجود في Environment Variables")
+
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL غير موجود في Environment Variables")
 
 # ======================
 # قاعدة البيانات
@@ -37,6 +42,7 @@ CREATE TABLE IF NOT EXISTS students (
 """)
 conn.commit()
 
+
 def set_student(user_id, name, status):
     cursor.execute("""
     INSERT INTO students (user_id, name, status)
@@ -47,22 +53,31 @@ def set_student(user_id, name, status):
     """, (user_id, name, status))
     conn.commit()
 
+
 def remove_student(user_id):
     cursor.execute("DELETE FROM students WHERE user_id=?", (user_id,))
     conn.commit()
+
 
 def clear_all():
     cursor.execute("DELETE FROM students")
     conn.commit()
 
+
 def get_all():
     cursor.execute("SELECT name, status FROM students")
     return cursor.fetchall()
+
 
 # ======================
 # حالة التسجيل
 # ======================
 registration_open = True
+
+
+def is_admin(user_id: int):
+    return user_id in ADMIN_IDS
+
 
 # ======================
 # لوحة الأزرار
@@ -83,19 +98,13 @@ def keyboard():
         ],
     ])
 
-def is_admin(user_id: int):
-    return user_id in ADMIN_IDS
 
-# ======================
-# عرض الحالة
-# ======================
 def get_status():
     date_now = datetime.now().strftime("%Y-%m-%d")
 
     data = get_all()
 
-    text = f"""
-🤖 مساعد الأكاديمية
+    text = f"""🤖 بوت الأكاديمية
 📅 التاريخ: {date_now}
 
 🔒 التسجيل: {'مفتوح ✅' if registration_open else 'مغلق ⛔'}
@@ -103,7 +112,11 @@ def get_status():
 -----------------------
 """
 
-    categories = {"read": "قرأت", "listen": "مستمعة", "excuse": "معتذرة"}
+    categories = {
+        "read": "📘 قرأت",
+        "listen": "🎧 مستمعة",
+        "excuse": "🚫 معتذرة"
+    }
 
     for key, title in categories.items():
         text += f"\n{title}:\n"
@@ -111,14 +124,16 @@ def get_status():
         text += "\n".join([f"• {i}" for i in items]) if items else "لا يوجد"
         text += "\n"
 
-    text += "\n-----------------------\n📖 استمر في التعلم"
+    text += "\n-----------------------\n📚 استمر في التعلم"
     return text
 
+
 # ======================
-# start
+# /start
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_status(), reply_markup=keyboard())
+
 
 # ======================
 # الأزرار
@@ -154,16 +169,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(get_status(), reply_markup=keyboard())
 
-# ======================
-# webhook setup
-# ======================
-async def post_init(app: Application):
-    if WEBHOOK_URL:
-        await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
 
 # ======================
-# تشغيل البوت
+# تشغيل Webhook
 # ======================
+async def post_init(app: Application):
+    await app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
+
+
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
@@ -174,7 +187,9 @@ def main():
         listen="0.0.0.0",
         port=PORT,
         url_path="webhook",
+        webhook_url=f"{WEBHOOK_URL}/webhook"
     )
+
 
 if __name__ == "__main__":
     main()
