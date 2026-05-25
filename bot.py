@@ -4,21 +4,14 @@ import re
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ContextTypes
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# ================= CONFIG =================
+# ================= TOKEN =================
 TOKEN = os.environ.get("BOT_TOKEN")
 
 application = Application.builder().token(TOKEN).build()
 
-# ================= DATABASE =================
+# ================= DB =================
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -48,7 +41,7 @@ cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked','false')")
 conn.commit()
 
 # ================= TIME =================
-def get_time():
+def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 # ================= ADMIN =================
@@ -60,17 +53,17 @@ async def is_admin(user_id, chat_id):
         return False
 
 # ================= TEXT =================
-def get_status_text():
+def get_text():
     cursor.execute("SELECT name, status FROM students")
-    data = cursor.fetchall()
+    students = cursor.fetchall()
 
     cursor.execute("SELECT name FROM banned")
-    banned = [r[0] for r in cursor.fetchall()]
+    banned = [x[0] for x in cursor.fetchall()]
 
     text = (
         "السلام عليكم ورحمة الله وبركاته\n\n"
         "📚 خادم القرآن الرقمي\n\n"
-        f"🕒 {get_time()}\n\n"
+        f"🕒 {now()}\n\n"
     )
 
     cats = {
@@ -82,56 +75,51 @@ def get_status_text():
 
     for key, title in cats.items():
         text += f"{title}:\n"
-        names = [n for n, s in data if s == key]
+        names = [n for n, s in students if s == key]
         text += "\n".join(f"• {n}" for n in names) if names else "لا يوجد"
         text += "\n\n"
 
     text += "🚫 المحظورات:\n"
     text += "\n".join(f"• {n}" for n in banned) if banned else "لا يوجد"
 
-    text += "\n\nوَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
+    text += "\n\nوَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا"
 
     return text
 
 # ================= KEYBOARD =================
-async def get_keyboard(update: Update):
-    kb = [
+async def keyboard(update: Update):
+    buttons = [
         [
             InlineKeyboardButton("✍ سجل إسمي", callback_data="register"),
-            InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove")
+            InlineKeyboardButton("❌ إحذف إسمي", callback_data="remove"),
         ],
         [
             InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            InlineKeyboardButton("🎧 مستمعات", callback_data="listen")
+            InlineKeyboardButton("🎧 مستمعات", callback_data="listen"),
         ],
         [
-            InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")
+            InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse"),
         ]
     ]
 
     if await is_admin(update.effective_user.id, update.effective_chat.id):
-        kb.append([
-            InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data="toggle"),
-            InlineKeyboardButton("🗑 تصفير القائمة", callback_data="clear")
+        buttons.append([
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
+            InlineKeyboardButton("🗑 تصفير", callback_data="clear"),
         ])
 
-    return InlineKeyboardMarkup(kb)
+    return InlineKeyboardMarkup(buttons)
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        get_status_text(),
-        reply_markup=await get_keyboard(update)
-    )
+    await update.message.reply_text(get_text(), reply_markup=await keyboard(update))
 
-# ================= LINK FILTER =================
-async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ================= LINK BLOCK =================
+async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
-    text = update.message.text or ""
-
-    if re.search(r"http|www|t\.me", text):
+    if re.search(r"http|www|t\.me", update.message.text or ""):
         if not await is_admin(update.effective_user.id, update.effective_chat.id):
             await update.message.delete()
             await update.message.reply_text(
@@ -140,30 +128,28 @@ async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= BUTTONS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    q = update.callback_query
+    await q.answer()
 
-    uid = query.from_user.id
-    name = query.from_user.full_name
-    data = query.data
+    uid = q.from_user.id
+    name = q.from_user.full_name
+    data = q.data
 
     locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
 
     if data == "toggle":
-        if await is_admin(uid, query.message.chat.id):
-            new = "false" if locked == "true" else "true"
-            cursor.execute("UPDATE settings SET value=? WHERE key='locked'", (new,))
+        new = "false" if locked == "true" else "true"
+        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", (new,))
 
     elif data == "clear":
-        if await is_admin(uid, query.message.chat.id):
-            cursor.execute("DELETE FROM students")
+        cursor.execute("DELETE FROM students")
 
     elif data == "remove":
         cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
 
     elif data in ["register", "read", "listen", "excuse"]:
-        if locked == "true" and not await is_admin(uid, query.message.chat.id):
-            await query.answer("التسجيل مغلق", show_alert=True)
+        if locked == "true" and not await is_admin(uid, q.message.chat.id):
+            await q.answer("التسجيل مقفل", show_alert=True)
             return
 
         cursor.execute(
@@ -173,20 +159,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.commit()
 
-    await query.edit_message_text(
-        get_status_text(),
-        reply_markup=await get_keyboard(update)
-    )
+    await q.edit_message_text(get_text(), reply_markup=await keyboard(update))
 
 # ================= HANDLERS =================
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# ================= RUN (POLLING ONLY) =================
+# ================= RUN =================
 if __name__ == "__main__":
-    print("🚀 Bot running (Polling mode - stable)")
-
-    application.run_polling(
-        drop_pending_updates=True
-    )
+    print("Bot running (Polling mode)")
+    application.run_polling(drop_pending_updates=True)
