@@ -2,46 +2,39 @@ import os
 import sqlite3
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
+# =====================
+# إعدادات
+# =====================
 TOKEN = os.environ.get("BOT_TOKEN")
-RENDER_URL = os.environ.get("RENDER_URL")  # مثال: https://xxxx.onrender.com
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-# ---------------- BOT ----------------
-application = (
-    Application.builder()
-    .token(TOKEN)
-    .build()
-)
+# =====================
+# Telegram App
+# =====================
+application = Application.builder().token(TOKEN).build()
 
-# ---------------- DB ----------------
+# =====================
+# قاعدة البيانات
+# =====================
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY, name TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+
 cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked', 'false')")
 conn.commit()
 
-
-# ---------------- HELPERS ----------------
-async def is_admin(user_id, chat_id):
-    try:
-        admins = await application.bot.get_chat_administrators(chat_id)
-        return any(a.user.id == user_id for a in admins)
-    except:
-        return False
+# =====================
+# وظائف مساعدة
+# =====================
+def is_locked():
+    return cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0] == "true"
 
 
 def get_status_text():
@@ -49,15 +42,15 @@ def get_status_text():
     data = cursor.fetchall()
 
     cursor.execute("SELECT name FROM banned")
-    banned = [x[0] for x in cursor.fetchall()]
+    banned_list = [r[0] for r in cursor.fetchall()]
 
-    text = "📋 قائمة الأدوار\n\n"
+    text = "📖 خادم القرآن الرقمي\n\n"
 
     categories = {
         "register": "✍️ المسجلات",
         "read": "✅ قرأت",
         "listen": "🎧 مستمعات",
-        "excuse": "⛔ معتذرات",
+        "excuse": "⛔️ معتذرات"
     }
 
     for key, title in categories.items():
@@ -67,107 +60,98 @@ def get_status_text():
         text += "\n\n"
 
     text += "🚫 المحظورات:\n"
-    text += "\n".join(banned) if banned else "لا يوجد"
+    text += "\n".join([f"• {n}" for n in banned_list]) if banned_list else "لا يوجد"
 
     return text
 
 
-async def get_keyboard(update):
+async def is_admin(user_id, chat_id):
+    try:
+        admins = await application.bot.get_chat_administrators(chat_id)
+        return any(a.user.id == user_id for a in admins)
+    except:
+        return False
+
+
+def keyboard(update):
     kb = [
-        [
-            InlineKeyboardButton("✍ سجل", callback_data="register"),
-            InlineKeyboardButton("❌ حذف", callback_data="remove"),
-        ],
-        [
-            InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            InlineKeyboardButton("🎧 مستمعات", callback_data="listen"),
-        ],
-        [InlineKeyboardButton("⛔ معتذرات", callback_data="excuse")],
+        [InlineKeyboardButton("✍ تسجيل", callback_data="register"),
+         InlineKeyboardButton("❌ حذف", callback_data="remove")],
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
+         InlineKeyboardButton("🎧 مستمعة", callback_data="listen")],
+        [InlineKeyboardButton("⛔ معتذرة", callback_data="excuse")]
     ]
-
-    admin = await is_admin(update.effective_user.id, update.effective_chat.id)
-
-    if admin:
-        locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
-
-        kb.append([
-            InlineKeyboardButton(
-                "🔓 فتح" if locked == "true" else "🔒 قفل",
-                callback_data="toggle",
-            ),
-            InlineKeyboardButton("🗑 تصفير", callback_data="clear"),
-        ])
-
     return InlineKeyboardMarkup(kb)
 
-
-# ---------------- HANDLERS ----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        get_status_text(),
-        reply_markup=await get_keyboard(update),
-    )
+# =====================
+# أوامر
+# =====================
+async def start(update, context):
+    await update.message.reply_text(get_status_text(), reply_markup=keyboard(update))
 
 
-async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text or ""
-    if "http" in text or "t.me" in text:
-        if not await is_admin(update.effective_user.id, update.effective_chat.id):
-            await update.message.delete()
+async def handle_buttons(update, context):
+    query = update.callback_query
+    await query.answer()
 
+    uid = query.from_user.id
+    name = query.from_user.full_name
+    data = query.data
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    uid = q.from_user.id
-    name = q.from_user.full_name
-    data = q.data
-
-    if data == "toggle":
-        val = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
-        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", ("false" if val == "true" else "true",))
-
-    elif data == "clear":
-        cursor.execute("DELETE FROM students")
-
-    elif data == "remove":
+    if data == "remove":
         cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
-
-    elif data in ["register", "read", "listen", "excuse"]:
-        locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
-
-        if locked == "true":
-            await q.answer("التسجيل مقفل", show_alert=True)
+    else:
+        if is_locked() and not await is_admin(uid, query.message.chat.id):
+            await query.answer("التسجيل مقفل", show_alert=True)
             return
 
         cursor.execute(
             "INSERT OR REPLACE INTO students VALUES (?, ?, ?)",
-            (uid, name, data),
+            (uid, name, data)
         )
 
     conn.commit()
-
-    await q.edit_message_text(
-        get_status_text(),
-        reply_markup=await get_keyboard(update),
-    )
+    await query.edit_message_text(get_status_text(), reply_markup=keyboard(update))
 
 
-# ---------------- REGISTER HANDLERS ----------------
+async def block_links(update, context):
+    text = update.message.text or ""
+    if "http" in text and not await is_admin(update.effective_user.id, update.effective_chat.id):
+        await update.message.delete()
+        await update.message.reply_text("⛔ الروابط ممنوعة")
+
+
+# =====================
+# Handlers
+# =====================
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(buttons))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
+application.add_handler(CallbackQueryHandler(handle_buttons))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
 
-
-# ---------------- WEBHOOK ----------------
+# =====================
+# Webhook route (IMPORTANT FIX)
+# =====================
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+
+    # تشغيل مباشر بدون create_task (هذا سبب خطأك السابق)
     application.update_queue.put_nowait(update)
-    return "OK"
+
+    return "ok", 200
 
 
-# ---------------- START ----------------
+@app.route("/")
+def home():
+    return "Bot is running", 200
+
+
+# =====================
+# تشغيل التطبيق
+# =====================
 if __name__ == "__main__":
-    application.run_polling()
+    application.initialize()
+    application.start()
+
+    app.run(host="0.0.0.0", port=PORT)
