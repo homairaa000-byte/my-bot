@@ -17,7 +17,7 @@ registered = {}
 readers = set()
 listeners = set()
 excused = set()
-blocked = {}   # uid -> name
+blocked = {}  # uid -> name
 
 registration_open = True
 
@@ -82,29 +82,9 @@ def menu():
 
 # ===== start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = f"""
-🌿 أهلاً وسهلاً بك في خادم القرآن الرقمي 🤍
+    await update.message.reply_text(build_text(), reply_markup=menu())
 
-📌 شرح البوت:
-• تسجيل الأسماء في الأدوار
-• متابعة القراءة بعلامة ✅
-• تنظيم (مسجلات / مستمعات / معتذرات)
-• عرض المحظورات
-• منع الروابط داخل المجموعة 🚫
-
-✨ طريقة الاستخدام:
-• سجل إسمي → للتسجيل
-• قرأت → لتأكيد القراءة
-• مستمعة / معتذرة → تغيير الحالة
-
-🔒 الإدارة تتحكم في القفل والفتح
-
-🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم
-"""
-
-    await update.message.reply_text(text, reply_markup=menu())
-
-# ===== الحظر =====
+# ===== الحظر (FIXED) =====
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global blocked
 
@@ -125,6 +105,9 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🚫 تم حظر {name}")
 
+    # 🔥 تحديث القائمة مباشرة
+    await update.message.reply_text(build_text(), reply_markup=menu())
+
 # ===== فك الحظر =====
 async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global blocked
@@ -138,12 +121,15 @@ async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = user.first_name
 
     if uid not in blocked:
-        await update.message.reply_text("ℹ️ غير محظورة")
+        await update.message.reply_text("ℹ️ هذه الطالبة ليست محظورة")
         return
 
     blocked.pop(uid, None)
 
     await update.message.reply_text(f"✅ تم فك الحظر عن {name}")
+
+    # 🔥 تحديث القائمة
+    await update.message.reply_text(build_text(), reply_markup=menu())
 
 # ===== الأزرار =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
