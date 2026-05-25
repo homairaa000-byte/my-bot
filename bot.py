@@ -5,9 +5,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
+
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
+# ===== البيانات =====
 registered = {}
 readers = set()
 listeners = set()
@@ -16,31 +18,45 @@ blocked = {}
 
 registration_open = True
 
+# ===== الوقت =====
 def now():
-    return datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%Y-%m-%d %H:%M")
+    return datetime.datetime.now(
+        pytz.timezone("Asia/Riyadh")
+    ).strftime("%Y-%m-%d %H:%M")
 
-def format_list():
+# ===== تنسيق المسجلات =====
+def format_registered():
     if not registered:
         return "لا يوجد"
-    return "\n".join([f"• {name}" for name in registered.values()])
 
+    text = ""
+    for uid, name in registered.items():
+        mark = "✅️" if name in readers else ""
+        text += "• " + name + " " + mark + "\n"
+    return text
+
+# ===== بناء القائمة =====
 def build_text():
-    lock = "🔓 مفتوح" if registration_open else "🔒 مغلق"
+    lock = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
 
-    return f"""
-السلام عليكم ورحمة الله وبركاته 🌿
+    return (
+        "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
+        "خادم القرآن الرقمي 🤍\n"
+        "📅 " + now() + "\n\n"
+        + lock + "\n\n"
+        "📌 قائمة تسجيل الأدوار\n\n"
+        "✍️ المسجلات:\n"
+        + format_registered() + "\n\n"
+        "🎧 المستمعات:\n"
+        + ("\n".join(list(listeners)) if listeners else "لا يوجد") + "\n\n"
+        "⛔️ المعتذرات:\n"
+        + ("\n".join(list(excused)) if excused else "لا يوجد") + "\n\n"
+        "🚫 المحظورات:\n"
+        + ("\n".join(list(blocked.values())) if blocked else "لا يوجد") + "\n\n"
+        "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾"
+    )
 
-خادم القرآن الرقمي 🤍
-📅 {now()}
-
-{lock}
-
-✍️ المسجلات:
-{format_list()}
-
-﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾
-"""
-
+# ===== الأزرار =====
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ سجل", callback_data="reg")],
@@ -50,9 +66,14 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle")]
     ])
 
+# ===== start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    await update.message.reply_text(
+        build_text(),
+        reply_markup=menu()
+    )
 
+# ===== الأزرار =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
 
@@ -63,13 +84,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.id
     name = user.first_name
 
+    # 🚫 محظور
     if uid in blocked:
-        await q.answer("🚫 محظورة", show_alert=True)
+        await q.answer("🚫 أنتِ محظورة", show_alert=True)
         return
 
     data = q.data
 
-    # 🔒 القفل الحقيقي بدون كسر الرسالة
+    # 🔒 إذا التسجيل مغلق
     if not registration_open and data in ["reg", "read", "listen", "excused"]:
         await q.answer("🔒 التسجيل مغلق", show_alert=True)
         return
@@ -92,11 +114,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "toggle":
         registration_open = not registration_open
 
-    await q.edit_message_text(build_text(), reply_markup=menu())
+    await q.edit_message_text(
+        build_text(),
+        reply_markup=menu()
+    )
 
+# ===== تشغيل البوت =====
 app = Application.builder().token(TOKEN).build()
+
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(buttons))
 
-print("BOT RUNNING")
+print("BOT RUNNING ✔")
 app.run_polling()
