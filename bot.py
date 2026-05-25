@@ -1,10 +1,7 @@
 import os
 import sqlite3
 import re
-import asyncio
 from datetime import datetime
-
-from flask import Flask, request
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -12,14 +9,12 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters
+    filters,
+    ContextTypes
 )
 
 # ================= CONFIG =================
 TOKEN = os.environ.get("BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
-
-app = Flask(__name__)
 
 application = Application.builder().token(TOKEN).build()
 
@@ -52,10 +47,11 @@ CREATE TABLE IF NOT EXISTS settings (
 cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked','false')")
 conn.commit()
 
-# ================= HELPERS =================
+# ================= TIME =================
 def get_time():
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
 
+# ================= ADMIN =================
 async def is_admin(user_id, chat_id):
     try:
         admins = await application.bot.get_chat_administrators(chat_id)
@@ -93,12 +89,12 @@ def get_status_text():
     text += "🚫 المحظورات:\n"
     text += "\n".join(f"• {n}" for n in banned) if banned else "لا يوجد"
 
-    text += "\n\nوَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ\n"
+    text += "\n\nوَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
 
     return text
 
 # ================= KEYBOARD =================
-async def get_keyboard(update):
+async def get_keyboard(update: Update):
     kb = [
         [
             InlineKeyboardButton("✍ سجل إسمي", callback_data="register"),
@@ -122,14 +118,14 @@ async def get_keyboard(update):
     return InlineKeyboardMarkup(kb)
 
 # ================= START =================
-async def start(update: Update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         get_status_text(),
         reply_markup=await get_keyboard(update)
     )
 
 # ================= LINK FILTER =================
-async def link_filter(update: Update, context):
+async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
@@ -142,8 +138,8 @@ async def link_filter(update: Update, context):
                 "⛔️⛔️⛔️ إرسال روابط من دون الرجوع للإشراف يعرضك للحذف"
             )
 
-# ================= CALLBACK =================
-async def buttons(update: Update, context):
+# ================= BUTTONS =================
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -151,15 +147,13 @@ async def buttons(update: Update, context):
     name = query.from_user.full_name
     data = query.data
 
-    locked = cursor.execute(
-        "SELECT value FROM settings WHERE key='locked'"
-    ).fetchone()[0]
+    locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
 
     if data == "toggle":
         if await is_admin(uid, query.message.chat.id):
             new = "false" if locked == "true" else "true"
             cursor.execute("UPDATE settings SET value=? WHERE key='locked'", (new,))
-    
+
     elif data == "clear":
         if await is_admin(uid, query.message.chat.id):
             cursor.execute("DELETE FROM students")
@@ -189,17 +183,10 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
 application.add_handler(CallbackQueryHandler(buttons))
 
-# ================= WEBHOOK =================
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
-
-    asyncio.create_task(application.process_update(update))
-
-    return "ok", 200
-
-# ================= RUN =================
+# ================= RUN (POLLING ONLY) =================
 if __name__ == "__main__":
-    print("🚀 Bot running (Webhook mode)")
-    app.run(host="0.0.0.0", port=PORT)
+    print("🚀 Bot running (Polling mode - stable)")
+
+    application.run_polling(
+        drop_pending_updates=True
+    )
