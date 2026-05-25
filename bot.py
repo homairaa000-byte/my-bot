@@ -1,51 +1,29 @@
 import os
 import sqlite3
 import re
-from datetime import datetime
-import pytz
+import asyncio
+from flask import Flask, request
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
+# ================= CONFIG =================
 TOKEN = os.environ.get("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 10000))
 
-# ================= DB =================
+app = Flask(__name__)
+
+application = Application.builder().token(TOKEN).build()
+
+# ================= DATABASE =================
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS students (
-    user_id INTEGER PRIMARY KEY,
-    name TEXT,
-    status TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS banned (
-    user_id INTEGER PRIMARY KEY,
-    name TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-)
-""")
-
+cursor.execute("CREATE TABLE IF NOT EXISTS students (user_id INTEGER PRIMARY KEY, name TEXT, status TEXT)")
+cursor.execute("CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY, name TEXT)")
+cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
 cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked','false')")
 conn.commit()
-
-# ================= BOT =================
-application = Application.builder().token(TOKEN).build()
 
 # ================= ADMIN CHECK =================
 async def is_admin(user_id, chat_id):
@@ -54,11 +32,6 @@ async def is_admin(user_id, chat_id):
         return any(a.user.id == user_id for a in admins)
     except:
         return False
-
-# ================= DATE =================
-def get_date():
-    tz = pytz.timezone("Asia/Riyadh")
-    return datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
 # ================= TEXT =================
 def get_status_text():
@@ -86,11 +59,7 @@ def get_status_text():
     text += "🚫 المحظورات:\n"
     text += "\n".join(f"• {n}" for n in banned) if banned else "لا يوجد"
 
-    text += "\n\n﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾\n\n"
-
-    text += "خادم القرآن الرقمي\n"
-    text += f"📅 {get_date()}\n"
-
+    text += "\n\nخادم القرآن الرقمي\n"
     return text
 
 # ================= KEYBOARD =================
@@ -105,15 +74,14 @@ async def get_keyboard(update):
             InlineKeyboardButton("🎧 مستمعات", callback_data="listen")
         ],
         [
-            InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse"),
-            InlineKeyboardButton("🚫 محظورات", callback_data="banned")
+            InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")
         ]
     ]
 
     if await is_admin(update.effective_user.id, update.effective_chat.id):
         kb.append([
-            InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data="toggle"),
-            InlineKeyboardButton("🗑 تصفير القائمة", callback_data="clear")
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
+            InlineKeyboardButton("🗑 تصفير", callback_data="clear")
         ])
 
     return InlineKeyboardMarkup(kb)
@@ -131,22 +99,29 @@ async def link_filter(update: Update, context):
         if re.search(r"http|www|t\.me", update.message.text):
             if not await is_admin(update.effective_user.id, update.effective_chat.id):
                 await update.message.delete()
-                await update.message.reply_text(
-                    "⛔️⛔️⛔️ إرسال روابط من دون الرجوع للإشراف يعرضك للحذف"
-                )
+                await update.message.reply_text("⛔️⛔️⛔️ ممنوع إرسال روابط")
 
-# ================= BAN SYSTEM =================
-async def ban_user(update: Update, context):
-    msg = update.message
+# ================= HANDLERS =================
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
 
-    if not msg.reply_to_message:
-        await msg.reply_text("❌ لازم ترد على رسالة الطالبة")
-        return
+# ================= WEBHOOK ROUTE =================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
 
-    if not await is_admin(update.effective_user.id, update.effective_chat.id):
-        return
+    # حل مشكلة asyncio في Render
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.process_update(update))
 
-    user = msg.reply_to_message.from_user
-    name = user.full_name
+    return "ok", 200
 
-    cursor.execute("DELETE FROM students WHERE user_id=?",
+# ================= RUN =================
+if __name__ == "__main__":
+    print("Bot running via Webhook...")
+
+    application.initialize()
+    application.start()
+
+    app.run(host="0.0.0.0", port=PORT)
