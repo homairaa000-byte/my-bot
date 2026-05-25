@@ -28,7 +28,7 @@ def makkah_time():
 
 # ===== بناء القائمة =====
 def build_text():
-    text = f"""
+    return f"""
 السلام عليكم ورحمة الله وبركاته 🌿
 
 خادم القرآن الرقمي 🤍
@@ -50,9 +50,8 @@ def build_text():
 
 ﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾
 """
-    return text
 
-# ===== لوحة الأزرار =====
+# ===== الأزرار =====
 def menu():
     return InlineKeyboardMarkup([
         [
@@ -64,7 +63,7 @@ def menu():
             InlineKeyboardButton("⛔ معتذرة", callback_data="excused")
         ],
         [
-            InlineKeyboardButton("🚫 المحظورات", callback_data="show_blocked"),
+            InlineKeyboardButton("🚫 محظورات", callback_data="show"),
             InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle")
         ],
         [
@@ -72,7 +71,7 @@ def menu():
         ]
     ])
 
-# ===== /start =====
+# ===== start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_text(), reply_markup=menu())
 
@@ -91,7 +90,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = q.data
 
-    # تسجيل
     if data == "reg":
         if not registration_open:
             await q.edit_message_text("⛔ التسجيل مغلق")
@@ -100,8 +98,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "read":
-        readers.add(user)
         registered[user] = True
+        readers.add(user)
         await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "listen":
@@ -114,11 +112,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         listeners.discard(user)
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    elif data == "show_blocked":
+    elif data == "show":
         await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "toggle":
-        global registration_open
         registration_open = not registration_open
         await q.edit_message_text(build_text(), reply_markup=menu())
 
@@ -140,7 +137,7 @@ async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for e in update.message.entities:
             if e.type == "url":
                 await update.message.delete()
-                await update.message.reply_text("⛔️ إرسال روابط ممنوع وسيتم اتخاذ إجراء")
+                await update.message.reply_text("⛔️ الروابط ممنوعة")
                 return
 
 # ===== التشغيل =====
