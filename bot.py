@@ -7,22 +7,22 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
+print("🔥 BOT FILE STARTED")
+
 TOKEN = os.getenv("BOT_TOKEN")
+print("TOKEN:", "OK" if TOKEN else "MISSING")
 
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
-# ====== البيانات ======
 students = {}
 blocked = set()
 registration_open = True
 
-# ====== الوقت مكة ======
 def makkah_time():
     tz = pytz.timezone("Asia/Riyadh")
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-# ====== لوحة التحكم ======
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍ سجل إسمي", callback_data="reg")],
@@ -35,25 +35,23 @@ def menu():
         [InlineKeyboardButton("🧹 تصفير", callback_data="reset")]
     ])
 
-# ====== بدء ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"""
 السلام عليكم ورحمة الله وبركاته 🌿
 
 ﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾
 
-خادم القرآن الرقمي 🤍
 📅 {makkah_time()}
 """
     await update.message.reply_text(text, reply_markup=menu())
 
-# ====== تسجيل ======
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
 
     q = update.callback_query
-    user = q.from_user.username or q.from_user.first_name
     await q.answer()
+
+    user = q.from_user.username or q.from_user.first_name
 
     if user in blocked:
         await q.edit_message_text("⛔ أنتِ محظورة")
@@ -62,61 +60,50 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data
 
     if data == "reg":
-        if not registration_open:
-            await q.edit_message_text("⛔ التسجيل مغلق")
-            return
         students[user] = "joined"
         await q.edit_message_text(f"✔ تم تسجيل {user}")
 
     elif data == "read":
         students[user] = "read"
-        await q.edit_message_text(f"📖 تم تسجيل قراءة {user}")
+        await q.edit_message_text(f"📖 تم تسجيل القراءة")
 
     elif data == "listen":
         students[user] = "listen"
-        await q.edit_message_text(f"🎧 تم نقل {user} للمستمعات")
+        await q.edit_message_text(f"🎧 تم نقلك للمستمعات")
 
     elif data == "excused":
         students[user] = "excused"
-        await q.edit_message_text(f"⛔ تم تسجيل {user} معتذرة")
+        await q.edit_message_text(f"⛔ معتذرة")
 
     elif data == "blocked":
         students[user] = "blocked"
-        await q.edit_message_text(f"🚫 تم تسجيل {user} محظورة")
+        await q.edit_message_text(f"🚫 محظورة")
 
     elif data == "delete":
         students.pop(user, None)
-        await q.edit_message_text(f"❌ تم حذف {user}")
+        await q.edit_message_text("❌ تم حذفك")
 
     elif data == "toggle":
+        global registration_open
         registration_open = not registration_open
         status = "مفتوح" if registration_open else "مغلق"
-        await q.edit_message_text(f"🔒 حالة التسجيل: {status}")
+        await q.edit_message_text(f"🔒 التسجيل: {status}")
 
     elif data == "reset":
         students.clear()
-        await q.edit_message_text("🧹 تم تصفير القائمة")
+        await q.edit_message_text("🧹 تم التصفير")
 
-# ====== منع الروابط ======
 async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
         return
-
-    if update.message.from_user.is_bot:
-        return
-
-    user = update.message.from_user.username or ""
 
     if update.message.entities:
         for e in update.message.entities:
             if e.type == "url":
                 await update.message.delete()
-                await update.message.reply_text(
-                    "⛔️⛔️⛔️ إرسال روابط من دون الرجوع للإشراف يعرضك للحذف"
-                )
+                await update.message.reply_text("⛔ الروابط ممنوعة")
                 return
 
-# ====== حظر بالرد ======
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         return
@@ -127,7 +114,6 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🚫 تم حظر {user}")
 
-# ====== تشغيل ======
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
