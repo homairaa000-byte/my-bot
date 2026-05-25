@@ -13,11 +13,11 @@ if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
 # ===== البيانات =====
-registered = {}
+registered = {}   # uid -> name
 readers = set()
 listeners = set()
 excused = set()
-blocked = {}  # uid -> name
+blocked = {}      # uid -> name
 
 registration_open = True
 
@@ -46,7 +46,7 @@ def build_text():
 📌 قائمة تسجيل الأدوار
 
 ✍️ المسجلات:
-{chr(10).join([f"• {n} {'✅️' if n in readers else ''}" for n in registered.values()]) or "لا يوجد"}
+{chr(10).join([f"• [{name}](tg://user?id={uid}) {'✅️' if name in readers else ''}" for uid, name in registered.items()]) or "لا يوجد"}
 
 🎧 المستمعات:
 {chr(10).join(list(listeners)) or "لا يوجد"}
@@ -55,7 +55,7 @@ def build_text():
 {chr(10).join(list(excused)) or "لا يوجد"}
 
 🚫 المحظورات:
-{chr(10).join(blocked.values()) or "لا يوجد"}
+{chr(10).join([f"• {name}" for name in blocked.values()]) or "لا يوجد"}
 
 ﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعُ الْمُحْسِنِينَ ﴾
 """
@@ -82,9 +82,22 @@ def menu():
 
 # ===== start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    text = """
+🌿 أهلاً بك في خادم القرآن الرقمي 🤍
 
-# ===== الحظر (FIXED) =====
+📌 الوظائف:
+• تسجيل الأدوار
+• متابعة القراءة
+• تنظيم المستمعات والمعتذرات
+• إدارة المحظورات
+
+✨ استخدمي الأزرار بالأسفل
+
+🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم
+"""
+    await update.message.reply_text(text, reply_markup=menu(), parse_mode="Markdown")
+
+# ===== الحظر =====
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global blocked
 
@@ -104,9 +117,7 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     excused.discard(name)
 
     await update.message.reply_text(f"🚫 تم حظر {name}")
-
-    # 🔥 تحديث القائمة مباشرة
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    await update.message.reply_text(build_text(), reply_markup=menu(), parse_mode="Markdown")
 
 # ===== فك الحظر =====
 async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -127,80 +138,10 @@ async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     blocked.pop(uid, None)
 
     await update.message.reply_text(f"✅ تم فك الحظر عن {name}")
-
-    # 🔥 تحديث القائمة
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    await update.message.reply_text(build_text(), reply_markup=menu(), parse_mode="Markdown")
 
 # ===== الأزرار =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
 
     q = update.callback_query
-    await q.answer()
-
-    user = q.from_user
-    uid = user.id
-    name = get_name(user)
-
-    if uid in blocked:
-        await q.edit_message_text("🚫 أنتِ محظورة")
-        return
-
-    data = q.data
-
-    if data == "reg":
-        if not registration_open:
-            await q.edit_message_text("🔒 التسجيل مغلق")
-            return
-        registered[uid] = name
-
-    elif data == "read":
-        if uid in registered:
-            readers.add(name)
-
-    elif data == "listen":
-        listeners.add(name)
-        registered.pop(uid, None)
-        readers.discard(name)
-        excused.discard(name)
-
-    elif data == "excused":
-        excused.add(name)
-        registered.pop(uid, None)
-        readers.discard(name)
-        listeners.discard(name)
-
-    elif data == "toggle":
-        registration_open = not registration_open
-
-    elif data == "reset":
-        registered.clear()
-        readers.clear()
-        listeners.clear()
-        excused.clear()
-
-    await q.edit_message_text(build_text(), reply_markup=menu())
-
-# ===== منع الروابط =====
-async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type == "private":
-        return
-
-    if update.message.entities:
-        for e in update.message.entities:
-            if e.type == "url":
-                await update.message.delete()
-                await update.message.reply_text("⛔️ الروابط ممنوعة")
-                return
-
-# ===== تشغيل =====
-app = Application.builder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ban", ban))
-app.add_handler(CommandHandler("unban", unban))
-app.add_handler(CallbackQueryHandler(buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
-
-print("BOT STARTED ✔")
-app.run_polling()
