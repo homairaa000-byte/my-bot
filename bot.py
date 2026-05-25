@@ -15,28 +15,37 @@ from telegram.ext import (
     ContextTypes
 )
 
-# ===== التوكن =====
+# =========================
+# BOT TOKEN
+# =========================
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
-# ===== البيانات =====
+# =========================
+# DATA
+# =========================
 registered = {}
 readers = set()
 listeners = set()
 excused = set()
-blocked = set()
+blocked = {}
 
 registration_open = True
 
-# ===== الوقت =====
+# =========================
+# TIME
+# =========================
 def now():
     tz = pytz.timezone("Asia/Riyadh")
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-# ===== تنسيق المسجلات =====
+# =========================
+# REGISTERED FORMAT
+# =========================
 def format_registered():
+
     if not registered:
         return "لا يوجد"
 
@@ -45,14 +54,17 @@ def format_registered():
     for uid, name in registered.items():
 
         mark = ""
+
         if name in readers:
             mark = " ✅️"
 
-        text += "• " + name + mark + "\n"
+        text += f"• {name}{mark}\n"
 
-    return text
+    return text.strip()
 
-# ===== بناء القائمة =====
+# =========================
+# LIST BUILD
+# =========================
 def build_text():
 
     status = "🔓 التسجيل مفتوح"
@@ -61,31 +73,47 @@ def build_text():
         status = "🔒 التسجيل مغلق"
 
     listeners_text = "\n".join(listeners) if listeners else "لا يوجد"
+
     excused_text = "\n".join(excused) if excused else "لا يوجد"
 
-    return (
+    blocked_text = (
+        "\n".join(blocked.values())
+        if blocked else "لا يوجد"
+    )
+
+    text = (
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
+
         "خادم القرآن الرقمي 🤍\n"
-        "📅 " + now() + "\n\n"
-        + status + "\n\n"
+
+        f"📅 {now()}\n\n"
+
+        f"{status}\n\n"
 
         "📌 قائمة تسجيل الأدوار\n\n"
 
         "✍️ المسجلات:\n"
-        + format_registered() + "\n\n"
+        f"{format_registered()}\n\n"
 
         "🎧 المستمعات:\n"
-        + listeners_text + "\n\n"
+        f"{listeners_text}\n\n"
 
         "⛔️ المعتذرات:\n"
-        + excused_text + "\n\n"
+        f"{excused_text}\n\n"
+
+        "🚫 المحظورات:\n"
+        f"{blocked_text}\n\n"
 
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا "
         "لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ "
         "وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾"
     )
 
-# ===== الأزرار =====
+    return text
+
+# =========================
+# BUTTONS
+# =========================
 def menu():
 
     keyboard = [
@@ -116,35 +144,48 @@ def menu():
 
         [
             InlineKeyboardButton(
-                "🔒 قفل / فتح",
+                "🔒 قفل / فتح التسجيل",
                 callback_data="toggle"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🧹 تصفير القائمة",
+                callback_data="reset"
             )
         ]
     ]
 
     return InlineKeyboardMarkup(keyboard)
 
-# ===== start =====
+# =========================
+# START
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome = (
         "🌿 أهلاً بك في خادم القرآن الرقمي 🤍\n\n"
-        "• تسجيل الأدوار\n"
-        "• تنظيم القراءة\n"
-        "• متابعة المستمعات والمعتذرات\n\n"
+
+        "📌 وظائف البوت:\n"
+        "• تنظيم تسجيل الأدوار\n"
+        "• متابعة القراءة\n"
+        "• تنظيم المستمعات والمعتذرات\n"
+        "• إدارة المحظورات\n\n"
+
         "🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم"
     )
 
-    await update.message.reply_text(
-        welcome
-    )
+    await update.message.reply_text(welcome)
 
     await update.message.reply_text(
         build_text(),
         reply_markup=menu()
     )
 
-# ===== الأزرار =====
+# =========================
+# BUTTONS ACTION
+# =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     global registration_open
@@ -158,7 +199,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.id
     name = user.first_name
 
-    # 🚫 المحظورات
+    # =========================
+    # BLOCKED CHECK
+    # =========================
     if uid in blocked:
 
         await q.answer(
@@ -170,7 +213,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = q.data
 
-    # 🔒 إذا التسجيل مغلق
+    # =========================
+    # CLOSED REGISTRATION
+    # =========================
     if (
         not registration_open
         and data in ["reg", "read", "listen", "excused"]
@@ -183,17 +228,27 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # ===== العمليات =====
-
+    # =========================
+    # REGISTER
+    # =========================
     if data == "reg":
 
         registered[uid] = name
 
+        listeners.discard(name)
+        excused.discard(name)
+
+    # =========================
+    # READ
+    # =========================
     elif data == "read":
 
         if uid in registered:
             readers.add(name)
 
+    # =========================
+    # LISTENER
+    # =========================
     elif data == "listen":
 
         listeners.add(name)
@@ -204,6 +259,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         excused.discard(name)
 
+    # =========================
+    # EXCUSED
+    # =========================
     elif data == "excused":
 
         excused.add(name)
@@ -214,26 +272,114 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         listeners.discard(name)
 
+    # =========================
+    # TOGGLE
+    # =========================
     elif data == "toggle":
 
         registration_open = not registration_open
 
-    # ===== تحديث القائمة =====
+    # =========================
+    # RESET
+    # =========================
+    elif data == "reset":
+
+        registered.clear()
+
+        readers.clear()
+
+        listeners.clear()
+
+        excused.clear()
+
+    # =========================
+    # UPDATE MESSAGE
+    # =========================
     await q.edit_message_text(
         build_text(),
         reply_markup=menu()
     )
 
-# ===== أخطاء =====
+# =========================
+# BAN
+# =========================
+async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message.reply_to_message:
+
+        await update.message.reply_text(
+            "❗ قومي بالرد على رسالة الطالبة ثم استخدمي /ban"
+        )
+
+        return
+
+    user = update.message.reply_to_message.from_user
+
+    uid = user.id
+    name = user.first_name
+
+    blocked[uid] = name
+
+    registered.pop(uid, None)
+
+    readers.discard(name)
+
+    listeners.discard(name)
+
+    excused.discard(name)
+
+    await update.message.reply_text(
+        f"🚫 تم حظر {name}"
+    )
+
+# =========================
+# UNBAN
+# =========================
+async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message.reply_to_message:
+
+        await update.message.reply_text(
+            "❗ قومي بالرد على رسالة الطالبة ثم استخدمي /unban"
+        )
+
+        return
+
+    user = update.message.reply_to_message.from_user
+
+    uid = user.id
+    name = user.first_name
+
+    if uid in blocked:
+
+        blocked.pop(uid)
+
+        await update.message.reply_text(
+            f"✅ تم فك الحظر عن {name}"
+        )
+
+# =========================
+# ERROR HANDLER
+# =========================
 async def error_handler(update, context):
 
     print("ERROR:", context.error)
 
-# ===== تشغيل =====
+# =========================
+# APP
+# =========================
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(
     CommandHandler("start", start)
+)
+
+app.add_handler(
+    CommandHandler("ban", ban)
+)
+
+app.add_handler(
+    CommandHandler("unban", unban)
 )
 
 app.add_handler(
@@ -244,7 +390,9 @@ app.add_error_handler(error_handler)
 
 print("BOT RUNNING ✔")
 
-# 🔥 حل مشكلة التعارض
+# =========================
+# RUN
+# =========================
 app.run_polling(
     drop_pending_updates=True
 )
