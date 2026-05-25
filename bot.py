@@ -43,7 +43,6 @@ def now():
 ADMIN CHECK
 # =========================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
-    # البوت يتحقق من صلاحيات المشرف من تيليجرام مباشرة
     try:
         member = await context.bot.get_chat_member(update.effective_chat.id, user_id)
         return member.status in ['administrator', 'creator']
@@ -79,13 +78,21 @@ def menu():
 HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private": return
-    await update.message.reply_text(
-        "🌿 أهلاً بك في خادم القرآن الرقمي 🤍\n\n"
-        "📌 طريقة الاستخدام:\n• سجل إسمي → تسجيل\n• قرأت → تأكيد القراءة\n• مستمعة / معتذرة\n\n"
-        "🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم"
-    )
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    # إرسال الترحيب في الخاص فقط
+    if update.effective_chat.type == "private":
+        await update.message.reply_text(
+            "🌿 أهلاً بك في خادم القرآن الرقمي 🤍\n\n"
+            "📌 وظائف البوت:\n"
+            "• تنظيم تسجيل الأدوار\n"
+            "• متابعة القراءة\n"
+            "• تنظيم المستمعات والمعتذرات\n"
+            "• إدارة المحظورات\n\n"
+            "🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم"
+        )
+        await update.message.reply_text(build_text(), reply_markup=menu())
+    # في المجموعات يمكننا إرسال القائمة فقط إذا رغبتِ (اختياري)
+    elif update.effective_chat.type in ["group", "supergroup"]:
+        await update.message.reply_text(build_text(), reply_markup=menu())
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
