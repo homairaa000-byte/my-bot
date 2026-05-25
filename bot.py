@@ -13,7 +13,7 @@ if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
 # ===== البيانات =====
-registered = {}   # user_id -> name
+registered = {}
 readers = set()
 listeners = set()
 excused = set()
@@ -26,7 +26,7 @@ def makkah_time():
     tz = pytz.timezone("Asia/Riyadh")
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-# ===== اسم المستخدم الحقيقي =====
+# ===== الاسم =====
 def get_name(user):
     return user.first_name
 
@@ -39,13 +39,12 @@ def build_text():
 
 خادم القرآن الرقمي 🤍
 📅 {makkah_time()}
-
 {lock_icon}
 
 📌 قائمة تسجيل الأدوار
 
 ✍️ المسجلات:
-{chr(10).join([f"• {name} {'✅️' if name in readers else ''}" for name in registered.values()]) or "لا يوجد"}
+{chr(10).join([f"• {n} {'✅️' if n in readers else ''}" for n in registered.values()]) or "لا يوجد"}
 
 🎧 المستمعات:
 {chr(10).join(list(listeners)) or "لا يوجد"}
@@ -59,7 +58,7 @@ def build_text():
 ﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾
 """
 
-# ===== الأزرار =====
+# ===== لوحة الأزرار =====
 def menu():
     return InlineKeyboardMarkup([
         [
@@ -79,9 +78,31 @@ def menu():
         ]
     ])
 
-# ===== start =====
+# ===== رسالة الترحيب الجديدة =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(build_text(), reply_markup=menu())
+    welcome = f"""
+🌿 *أهلاً وسهلاً بكِ في خادم القرآن الرقمي* 🌿
+
+📌 هذا البوت يساعد في:
+• تسجيل الأسماء في قائمة الأدوار
+• متابعة من قرأ القرآن
+• تقسيم المشاركات (مستمعة / معتذرة)
+• عرض المحظورات
+• تنظيم القوائم بشكل تلقائي
+
+✨ طريقة الاستخدام:
+• اضغطي "سجل إسمي" للتسجيل
+• "قرأت" لتأكيد القراءة
+• "مستمعة" أو "معتذرة" لتغيير حالتك
+• القائمة تتحدث تلقائياً لكل المستخدمين
+
+🔒 يوجد نظام قفل تسجيل من المشرفة
+🚫 ويتم منع الروابط داخل المجموعة
+
+🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم
+"""
+
+    await update.message.reply_text(welcome, reply_markup=menu(), parse_mode="Markdown")
 
 # ===== الأزرار =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,7 +121,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = q.data
 
-    # تسجيل
     if data == "reg":
         if not registration_open:
             await q.edit_message_text("⛔ التسجيل مغلق")
@@ -108,48 +128,30 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         registered[user_id] = name
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # قرأت
     elif data == "read":
         registered[user_id] = name
         readers.add(name)
-
         listeners.discard(name)
         excused.discard(name)
-
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # مستمعة
     elif data == "listen":
         listeners.add(name)
-
-        readers.discard(name)
-        excused.discard(name)
-
         registered.pop(user_id, None)
-
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # معتذرة
     elif data == "excused":
         excused.add(name)
-
-        readers.discard(name)
-        listeners.discard(name)
-
         registered.pop(user_id, None)
-
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # قفل/فتح
     elif data == "toggle":
         registration_open = not registration_open
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # محظورات
     elif data == "show":
         await q.edit_message_text(build_text(), reply_markup=menu())
 
-    # تصفير
     elif data == "reset":
         registered.clear()
         readers.clear()
@@ -166,7 +168,7 @@ async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for e in update.message.entities:
             if e.type == "url":
                 await update.message.delete()
-                await update.message.reply_text("⛔️ إرسال الروابط ممنوع")
+                await update.message.reply_text("⛔️ الروابط ممنوعة")
                 return
 
 # ===== التشغيل =====
