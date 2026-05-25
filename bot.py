@@ -17,12 +17,12 @@ registered = {}
 readers = set()
 listeners = set()
 excused = set()
-blocked = set()
+blocked = {}   # uid -> name
 
 registration_open = True
 
 # ===== الوقت =====
-def makkah_time():
+def now():
     tz = pytz.timezone("Asia/Riyadh")
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
@@ -32,14 +32,16 @@ def get_name(user):
 
 # ===== بناء القائمة =====
 def build_text():
-    lock_icon = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
+
+    lock = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
 
     return f"""
 السلام عليكم ورحمة الله وبركاته 🌿
 
 خادم القرآن الرقمي 🤍
-📅 {makkah_time()}
-{lock_icon}
+📅 {now()}
+
+{lock}
 
 📌 قائمة تسجيل الأدوار
 
@@ -53,12 +55,12 @@ def build_text():
 {chr(10).join(list(excused)) or "لا يوجد"}
 
 🚫 المحظورات:
-{chr(10).join(list(blocked)) or "لا يوجد"}
+{chr(10).join(blocked.values()) or "لا يوجد"}
 
-﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾
+﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعُ الْمُحْسِنِينَ ﴾
 """
 
-# ===== لوحة الأزرار =====
+# ===== الأزرار =====
 def menu():
     return InlineKeyboardMarkup([
         [
@@ -70,39 +72,78 @@ def menu():
             InlineKeyboardButton("⛔ معتذرة", callback_data="excused")
         ],
         [
-            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
-            InlineKeyboardButton("🚫 محظورات", callback_data="show")
+            InlineKeyboardButton("🚫 محظورات", callback_data="show"),
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle")
         ],
         [
             InlineKeyboardButton("🧹 تصفير", callback_data="reset")
         ]
     ])
 
-# ===== رسالة الترحيب الجديدة =====
+# ===== start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome = f"""
-🌿 *أهلاً وسهلاً بكِ في خادم القرآن الرقمي* 🌿
+    text = f"""
+🌿 أهلاً وسهلاً بك في خادم القرآن الرقمي 🤍
 
-📌 هذا البوت يساعد في:
-• تسجيل الأسماء في قائمة الأدوار
-• متابعة من قرأ القرآن
-• تقسيم المشاركات (مستمعة / معتذرة)
+📌 شرح البوت:
+• تسجيل الأسماء في الأدوار
+• متابعة القراءة بعلامة ✅
+• تنظيم (مسجلات / مستمعات / معتذرات)
 • عرض المحظورات
-• تنظيم القوائم بشكل تلقائي
+• منع الروابط داخل المجموعة 🚫
 
 ✨ طريقة الاستخدام:
-• اضغطي "سجل إسمي" للتسجيل
-• "قرأت" لتأكيد القراءة
-• "مستمعة" أو "معتذرة" لتغيير حالتك
-• القائمة تتحدث تلقائياً لكل المستخدمين
+• سجل إسمي → للتسجيل
+• قرأت → لتأكيد القراءة
+• مستمعة / معتذرة → تغيير الحالة
 
-🔒 يوجد نظام قفل تسجيل من المشرفة
-🚫 ويتم منع الروابط داخل المجموعة
+🔒 الإدارة تتحكم في القفل والفتح
 
 🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم
 """
 
-    await update.message.reply_text(welcome, reply_markup=menu(), parse_mode="Markdown")
+    await update.message.reply_text(text, reply_markup=menu())
+
+# ===== الحظر =====
+async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global blocked
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text("❗ رد على رسالة الطالبة ثم /ban")
+        return
+
+    user = update.message.reply_to_message.from_user
+    uid = user.id
+    name = user.first_name
+
+    blocked[uid] = name
+
+    registered.pop(uid, None)
+    readers.discard(name)
+    listeners.discard(name)
+    excused.discard(name)
+
+    await update.message.reply_text(f"🚫 تم حظر {name}")
+
+# ===== فك الحظر =====
+async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global blocked
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text("❗ رد على رسالة الطالبة ثم /unban")
+        return
+
+    user = update.message.reply_to_message.from_user
+    uid = user.id
+    name = user.first_name
+
+    if uid not in blocked:
+        await update.message.reply_text("ℹ️ غير محظورة")
+        return
+
+    blocked.pop(uid, None)
+
+    await update.message.reply_text(f"✅ تم فك الحظر عن {name}")
 
 # ===== الأزرار =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -112,52 +153,47 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     user = q.from_user
-    user_id = user.id
+    uid = user.id
     name = get_name(user)
 
-    if user_id in blocked:
-        await q.edit_message_text("⛔ أنتِ محظورة")
+    if uid in blocked:
+        await q.edit_message_text("🚫 أنتِ محظورة")
         return
 
     data = q.data
 
     if data == "reg":
         if not registration_open:
-            await q.edit_message_text("⛔ التسجيل مغلق")
+            await q.edit_message_text("🔒 التسجيل مغلق")
             return
-        registered[user_id] = name
-        await q.edit_message_text(build_text(), reply_markup=menu())
+        registered[uid] = name
 
     elif data == "read":
-        registered[user_id] = name
-        readers.add(name)
-        listeners.discard(name)
-        excused.discard(name)
-        await q.edit_message_text(build_text(), reply_markup=menu())
+        if uid in registered:
+            readers.add(name)
 
     elif data == "listen":
         listeners.add(name)
-        registered.pop(user_id, None)
-        await q.edit_message_text(build_text(), reply_markup=menu())
+        registered.pop(uid, None)
+        readers.discard(name)
+        excused.discard(name)
 
     elif data == "excused":
         excused.add(name)
-        registered.pop(user_id, None)
-        await q.edit_message_text(build_text(), reply_markup=menu())
+        registered.pop(uid, None)
+        readers.discard(name)
+        listeners.discard(name)
 
     elif data == "toggle":
         registration_open = not registration_open
-        await q.edit_message_text(build_text(), reply_markup=menu())
-
-    elif data == "show":
-        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "reset":
         registered.clear()
         readers.clear()
         listeners.clear()
         excused.clear()
-        await q.edit_message_text("🧹 تم تصفير القائمة")
+
+    await q.edit_message_text(build_text(), reply_markup=menu())
 
 # ===== منع الروابط =====
 async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,10 +207,12 @@ async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⛔️ الروابط ممنوعة")
                 return
 
-# ===== التشغيل =====
+# ===== تشغيل =====
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("ban", ban))
+app.add_handler(CommandHandler("unban", unban))
 app.add_handler(CallbackQueryHandler(buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
 
