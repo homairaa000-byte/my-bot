@@ -19,7 +19,6 @@ from telegram.ext import (
 
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
@@ -31,10 +30,7 @@ readers = set()
 listeners = set()
 excused = set()
 blocked = {}
-
 registration_open = True
-
-ADMIN_IDS = set()  # ضع/ي ايدي المشرفات هنا
 
 # =========================
 TIME
@@ -44,172 +40,108 @@ def now():
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
 # =========================
+ADMIN CHECK
+# =========================
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    # البوت يتحقق من صلاحيات المشرف من تيليجرام مباشرة
+    try:
+        member = await context.bot.get_chat_member(update.effective_chat.id, user_id)
+        return member.status in ['administrator', 'creator']
+    except:
+        return False
+
+# =========================
 TEXT BUILD
 # =========================
 def build_text():
-
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
-
     return (
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
         "خادم القرآن الرقمي 🤍\n"
         f"📅 {now()}\n\n"
         f"{status}\n\n"
-
         "📌 قائمة تسجيل الأدوار\n\n"
-
-        "✍️ المسجلات:\n" +
-        ("\n".join([f"• {n}" for n in registered.values()]) or "لا يوجد") + "\n\n"
-
-        "🎧 المستمعات:\n" +
-        ("\n".join(listeners) or "لا يوجد") + "\n\n"
-
-        "⛔️ المعتذرات:\n" +
-        ("\n".join(excused) or "لا يوجد") + "\n\n"
-
-        "🚫 المحظورات:\n" +
-        ("\n".join(blocked.values()) or "لا يوجد") + "\n\n"
-
+        "✍️ المسجلات:\n" + ("\n".join([f"• {n}" for n in registered.values()]) or "لا يوجد") + "\n\n"
+        "🎧 المستمعات:\n" + ("\n".join(listeners) or "لا يوجد") + "\n\n"
+        "⛔️ المعتذرات:\n" + ("\n".join(excused) or "لا يوجد") + "\n\n"
+        "🚫 المحظورات:\n" + ("\n".join(blocked.values()) or "لا يوجد") + "\n\n"
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾"
     )
 
-# =========================
-MENU
-# =========================
 def menu():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✍️ سجل", callback_data="reg"),
-            InlineKeyboardButton("📖 قرأت", callback_data="read")
-        ],
-        [
-            InlineKeyboardButton("🎧 مستمعة", callback_data="listen"),
-            InlineKeyboardButton("⛔ معتذرة", callback_data="excused")
-        ],
-        [
-            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
-            InlineKeyboardButton("🧹 تصفير", callback_data="reset")
-        ]
+        [InlineKeyboardButton("✍️ سجل", callback_data="reg"), InlineKeyboardButton("📖 قرأت", callback_data="read")],
+        [InlineKeyboardButton("🎧 مستمعة", callback_data="listen"), InlineKeyboardButton("⛔ معتذرة", callback_data="excused")],
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")]
     ])
 
 # =========================
-START (خاص)
+HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_chat.type != "private":
-        return  # لا يرسل في المجموعات
-
+    if update.effective_chat.type != "private": return
     await update.message.reply_text(
         "🌿 أهلاً بك في خادم القرآن الرقمي 🤍\n\n"
-        "📌 طريقة الاستخدام:\n"
-        "• سجل إسمي → تسجيل\n"
-        "• قرأت → تأكيد القراءة\n"
-        "• مستمعة / معتذرة\n"
-        "• القوائم تتحدث للجميع مباشرة\n\n"
+        "📌 طريقة الاستخدام:\n• سجل إسمي → تسجيل\n• قرأت → تأكيد القراءة\n• مستمعة / معتذرة\n\n"
         "🤍 اللهم اجعل أعمالنا خالصة لوجهك الكريم"
     )
+    await update.message.reply_text(build_text(), reply_markup=menu())
 
-    await update.message.reply_text(
-        build_text(),
-        reply_markup=menu()
-    )
-
-# =========================
-LINK FILTER
-# =========================
-async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = update.message.from_user
-
-    if user.id in ADMIN_IDS:
-        return
-
-    text = update.message.text or ""
-
-    if "http" in text or "www" in text:
-
-        await update.message.delete()
-
-        await update.message.reply_text(
-            "🚫🚫🚫 إرسال رابط من غير إذن الإشراف يعرضك للحذف أو الحظر"
-        )
-
-# =========================
-BUTTONS
-# =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     global registration_open
-
     q = update.callback_query
     await q.answer()
-
-    user = q.from_user
-    uid = user.id
-    name = user.first_name
+    
+    uid = q.from_user.id
+    name = q.from_user.first_name
 
     if uid in blocked:
         await q.answer("🚫 أنتِ محظورة", show_alert=True)
         return
 
-    # إذا مغلق لا يختفي ولا يغير شيء
-    if not registration_open and q.data in ["reg", "read", "listen", "excused"]:
+    # التحقق من صلاحيات الأزرار الإدارية
+    if q.data in ["toggle", "reset"]:
+        if not await is_admin(update, context, uid):
+            await q.answer("🚫 هذه الصلاحية للمشرفات فقط", show_alert=True)
+            return
+        if q.data == "toggle": registration_open = not registration_open
+        elif q.data == "reset":
+            registered.clear(); readers.clear(); listeners.clear(); excused.clear()
+    
+    # العمليات العادية
+    elif registration_open:
+        if q.data == "reg": registered[uid] = name
+        elif q.data == "read" and uid in registered: readers.add(name)
+        elif q.data == "listen": listeners.add(name); registered.pop(uid, None)
+        elif q.data == "excused": excused.add(name); registered.pop(uid, None)
+    else:
         await q.answer("🔒 التسجيل مغلق", show_alert=True)
         return
 
-    if q.data == "reg":
-        registered[uid] = name
-
-    elif q.data == "read":
-        if uid in registered:
-            readers.add(name)
-
-    elif q.data == "listen":
-        listeners.add(name)
-        registered.pop(uid, None)
-
-    elif q.data == "excused":
-        excused.add(name)
-        registered.pop(uid, None)
-
-    elif q.data == "toggle":
-        registration_open = not registration_open
-
-    elif q.data == "reset":
-        registered.clear()
-        readers.clear()
-        listeners.clear()
-        excused.clear()
-
     await q.edit_message_text(build_text(), reply_markup=menu())
 
-# =========================
-BAN
-# =========================
+async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_admin(update, context, update.message.from_user.id): return
+    if "http" in (update.message.text or "").lower() or "www" in (update.message.text or "").lower():
+        await update.message.delete()
+        await update.message.reply_text("🚫🚫🚫 إرسال رابط من غير إذن الإشراف يعرضك للحذف أو الحظر")
+
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not update.message.reply_to_message:
-        return
-
-    user = update.message.reply_to_message.from_user
-
-    blocked[user.id] = user.first_name
-
-    registered.pop(user.id, None)
-
-    await update.message.reply_text(f"🚫 تم حظر {user.first_name}")
+    if not await is_admin(update, context, update.message.from_user.id): return
+    if update.message.reply_to_message:
+        user = update.message.reply_to_message.from_user
+        blocked[user.id] = user.first_name
+        registered.pop(user.id, None)
+        await update.message.reply_text(f"🚫 تم حظر {user.first_name}")
 
 # =========================
 APP
 # =========================
 app = Application.builder().token(TOKEN).build()
-
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ban", ban))
-
 app.add_handler(CallbackQueryHandler(buttons))
-
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
 
-print("
+print("BOT RUNNING ✔")
+app.run_polling(drop_pending_updates=True)
