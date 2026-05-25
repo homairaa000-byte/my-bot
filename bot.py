@@ -7,45 +7,77 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-print("🔥 BOT FILE STARTED")
-
 TOKEN = os.getenv("BOT_TOKEN")
-print("TOKEN:", "OK" if TOKEN else "MISSING")
 
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
-students = {}
+# ===== البيانات =====
+registered = {}
+readers = set()
+listeners = set()
+excused = set()
 blocked = set()
+
 registration_open = True
 
+# ===== الوقت =====
 def makkah_time():
     tz = pytz.timezone("Asia/Riyadh")
     return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍ سجل إسمي", callback_data="reg")],
-        [InlineKeyboardButton("✅ قرأت", callback_data="read")],
-        [InlineKeyboardButton("🎧 مستمعات", callback_data="listen")],
-        [InlineKeyboardButton("⛔ معتذرات", callback_data="excused")],
-        [InlineKeyboardButton("🚫 محظورات", callback_data="blocked")],
-        [InlineKeyboardButton("❌ إحذف إسمي", callback_data="delete")],
-        [InlineKeyboardButton("🔒 قفل/فتح التسجيل", callback_data="toggle")],
-        [InlineKeyboardButton("🧹 تصفير", callback_data="reset")]
-    ])
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===== بناء القائمة =====
+def build_text():
     text = f"""
 السلام عليكم ورحمة الله وبركاته 🌿
 
-﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾
-
+خادم القرآن الرقمي 🤍
 📅 {makkah_time()}
-"""
-    await update.message.reply_text(text, reply_markup=menu())
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+📌 قائمة تسجيل الأدوار
+
+✍️ المسجلات:
+{chr(10).join([f"• {u} {'✅️' if u in readers else ''}" for u in registered]) or "لا يوجد"}
+
+🎧 المستمعات:
+{chr(10).join(list(listeners)) or "لا يوجد"}
+
+⛔️ المعتذرات:
+{chr(10).join(list(excused)) or "لا يوجد"}
+
+🚫 المحظورات:
+{chr(10).join(list(blocked)) or "لا يوجد"}
+
+﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾
+"""
+    return text
+
+# ===== لوحة الأزرار =====
+def menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ سجل إسمي", callback_data="reg"),
+            InlineKeyboardButton("📖 قرأت", callback_data="read")
+        ],
+        [
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listen"),
+            InlineKeyboardButton("⛔ معتذرة", callback_data="excused")
+        ],
+        [
+            InlineKeyboardButton("🚫 المحظورات", callback_data="show_blocked"),
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle")
+        ],
+        [
+            InlineKeyboardButton("🧹 تصفير", callback_data="reset")
+        ]
+    ])
+
+# ===== /start =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(build_text(), reply_markup=menu())
+
+# ===== الأزرار =====
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global registration_open
 
     q = update.callback_query
@@ -59,66 +91,63 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = q.data
 
+    # تسجيل
     if data == "reg":
-        students[user] = "joined"
-        await q.edit_message_text(f"✔ تم تسجيل {user}")
+        if not registration_open:
+            await q.edit_message_text("⛔ التسجيل مغلق")
+            return
+        registered[user] = True
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "read":
-        students[user] = "read"
-        await q.edit_message_text(f"📖 تم تسجيل القراءة")
+        readers.add(user)
+        registered[user] = True
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "listen":
-        students[user] = "listen"
-        await q.edit_message_text(f"🎧 تم نقلك للمستمعات")
+        listeners.add(user)
+        excused.discard(user)
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "excused":
-        students[user] = "excused"
-        await q.edit_message_text(f"⛔ معتذرة")
+        excused.add(user)
+        listeners.discard(user)
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
-    elif data == "blocked":
-        students[user] = "blocked"
-        await q.edit_message_text(f"🚫 محظورة")
-
-    elif data == "delete":
-        students.pop(user, None)
-        await q.edit_message_text("❌ تم حذفك")
+    elif data == "show_blocked":
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "toggle":
         global registration_open
         registration_open = not registration_open
-        status = "مفتوح" if registration_open else "مغلق"
-        await q.edit_message_text(f"🔒 التسجيل: {status}")
+        await q.edit_message_text(build_text(), reply_markup=menu())
 
     elif data == "reset":
-        students.clear()
-        await q.edit_message_text("🧹 تم التصفير")
+        registered.clear()
+        readers.clear()
+        listeners.clear()
+        excused.clear()
+        await q.edit_message_text("🧹 تم تصفير القائمة")
 
+# ===== منع الروابط =====
 async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
         return
+
+    user = update.message.from_user.username or update.message.from_user.first_name
 
     if update.message.entities:
         for e in update.message.entities:
             if e.type == "url":
                 await update.message.delete()
-                await update.message.reply_text("⛔ الروابط ممنوعة")
+                await update.message.reply_text("⛔️ إرسال روابط ممنوع وسيتم اتخاذ إجراء")
                 return
 
-async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.reply_to_message:
-        return
-
-    user = update.message.reply_to_message.from_user.username or update.message.reply_to_message.from_user.first_name
-    blocked.add(user)
-    students.pop(user, None)
-
-    await update.message.reply_text(f"🚫 تم حظر {user}")
-
+# ===== التشغيل =====
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ban", ban))
-app.add_handler(CallbackQueryHandler(handle_buttons))
+app.add_handler(CallbackQueryHandler(buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_links))
 
 print("BOT STARTED ✔")
