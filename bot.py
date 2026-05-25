@@ -8,16 +8,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.id
     name = user.first_name
 
-    # 🚫 حظر
+    # 🚫 منع المحظور
     if uid in blocked:
         await q.answer("🚫 أنتِ محظورة", show_alert=True)
         return
 
     data = q.data
 
-    # 🔒 لو التسجيل مغلق → لا نغير الرسالة أبداً
+    # 🔒 لو التسجيل مغلق → لا تعديل ولا إعادة رسالة
     if not registration_open and data in ["reg", "read", "listen", "excused"]:
-        await q.answer("🔒 التسجيل مغلق حالياً", show_alert=True)
+        await q.answer("🔒 التسجيل مغلق", show_alert=True)
         return
 
     # ===== العمليات =====
@@ -49,5 +49,5 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         listeners.clear()
         excused.clear()
 
-    # ✔ فقط هنا يتم تحديث القائمة عند وجود تغيير فعلي
+    # ✔ تحديث فقط عند وجود تغيير فعلي
     await q.edit_message_text(build_text(), reply_markup=menu())
