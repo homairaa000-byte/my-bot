@@ -1,4 +1,5 @@
-import os
+ import os
+import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -15,5 +16,5 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app.add_handler(CommandHandler("start", start))
 
 if __name__ == "__main__":
-    print("BOT RUNNING")
+    print("BOT STARTED")
     app.run_polling()
