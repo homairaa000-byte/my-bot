@@ -2,17 +2,29 @@ import os
 import sqlite3
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 TOKEN = os.environ.get("BOT_TOKEN")
+RENDER_URL = os.environ.get("RENDER_URL")  # مثال: https://xxxx.onrender.com
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-# Telegram Application
-application = Application.builder().token(TOKEN).build()
+# ---------------- BOT ----------------
+application = (
+    Application.builder()
+    .token(TOKEN)
+    .build()
+)
 
-# DB
+# ---------------- DB ----------------
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -22,7 +34,8 @@ cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value
 cursor.execute("INSERT OR IGNORE INTO settings VALUES ('locked', 'false')")
 conn.commit()
 
-# ---------- Helpers ----------
+
+# ---------------- HELPERS ----------------
 async def is_admin(user_id, chat_id):
     try:
         admins = await application.bot.get_chat_administrators(chat_id)
@@ -38,16 +51,16 @@ def get_status_text():
     cursor.execute("SELECT name FROM banned")
     banned = [x[0] for x in cursor.fetchall()]
 
-    text = "📚 خادم القرآن الرقمي\n\nقائمة التسجيل:\n\n"
+    text = "📋 قائمة الأدوار\n\n"
 
-    cats = {
+    categories = {
         "register": "✍️ المسجلات",
         "read": "✅ قرأت",
         "listen": "🎧 مستمعات",
-        "excuse": "⛔️ معتذرات"
+        "excuse": "⛔ معتذرات",
     }
 
-    for key, title in cats.items():
+    for key, title in categories.items():
         text += f"{title}:\n"
         names = [f"• {n}" for n, s in data if s == key]
         text += "\n".join(names) if names else "لا يوجد"
@@ -62,44 +75,48 @@ def get_status_text():
 async def get_keyboard(update):
     kb = [
         [
-            InlineKeyboardButton("✍ سجل إسمي", callback_data="register"),
-            InlineKeyboardButton("❌ حذف", callback_data="remove")
+            InlineKeyboardButton("✍ سجل", callback_data="register"),
+            InlineKeyboardButton("❌ حذف", callback_data="remove"),
         ],
         [
             InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            InlineKeyboardButton("🎧 مستمعات", callback_data="listen")
+            InlineKeyboardButton("🎧 مستمعات", callback_data="listen"),
         ],
-        [InlineKeyboardButton("⛔️ معتذرات", callback_data="excuse")]
+        [InlineKeyboardButton("⛔ معتذرات", callback_data="excuse")],
     ]
 
-    if await is_admin(update.effective_user.id, update.effective_chat.id):
+    admin = await is_admin(update.effective_user.id, update.effective_chat.id)
+
+    if admin:
         locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
-        status = "🔓 فتح التسجيل" if locked == "true" else "🔒 قفل التسجيل"
 
         kb.append([
-            InlineKeyboardButton(status, callback_data="toggle"),
-            InlineKeyboardButton("🗑 تصفير", callback_data="clear")
+            InlineKeyboardButton(
+                "🔓 فتح" if locked == "true" else "🔒 قفل",
+                callback_data="toggle",
+            ),
+            InlineKeyboardButton("🗑 تصفير", callback_data="clear"),
         ])
 
     return InlineKeyboardMarkup(kb)
 
 
-# ---------- Handlers ----------
-async def start(update, context):
+# ---------------- HANDLERS ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         get_status_text(),
-        reply_markup=await get_keyboard(update)
+        reply_markup=await get_keyboard(update),
     )
 
 
-async def filter_links(update, context):
+async def link_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
-    if "http" in text or "t.me" in text or "www" in text:
-        await update.message.delete()
-        await update.message.reply_text("⛔️ الروابط ممنوعة")
+    if "http" in text or "t.me" in text:
+        if not await is_admin(update.effective_user.id, update.effective_chat.id):
+            await update.message.delete()
 
 
-async def buttons(update, context):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
@@ -107,11 +124,9 @@ async def buttons(update, context):
     name = q.from_user.full_name
     data = q.data
 
-    locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
-
     if data == "toggle":
-        new = "false" if locked == "true" else "true"
-        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", (new,))
+        val = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
+        cursor.execute("UPDATE settings SET value=? WHERE key='locked'", ("false" if val == "true" else "true",))
 
     elif data == "clear":
         cursor.execute("DELETE FROM students")
@@ -120,39 +135,39 @@ async def buttons(update, context):
         cursor.execute("DELETE FROM students WHERE user_id=?", (uid,))
 
     elif data in ["register", "read", "listen", "excuse"]:
+        locked = cursor.execute("SELECT value FROM settings WHERE key='locked'").fetchone()[0]
+
         if locked == "true":
-            await q.answer("التسجيل مغلق", show_alert=True)
+            await q.answer("التسجيل مقفل", show_alert=True)
             return
+
         cursor.execute(
             "INSERT OR REPLACE INTO students VALUES (?, ?, ?)",
-            (uid, name, data)
+            (uid, name, data),
         )
 
     conn.commit()
 
     await q.edit_message_text(
         get_status_text(),
-        reply_markup=await get_keyboard(update)
+        reply_markup=await get_keyboard(update),
     )
 
 
-# ---------- register handlers ----------
+# ---------------- REGISTER HANDLERS ----------------
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, filter_links))
 application.add_handler(CallbackQueryHandler(buttons))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, link_filter))
 
 
-# ---------- WEBHOOK ----------
+# ---------------- WEBHOOK ----------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-
-    # ✔ الحل الصحيح (بدون asyncio مشاكل)
     application.update_queue.put_nowait(update)
+    return "OK"
 
-    return "ok", 200
 
-
-# ---------- START ----------
+# ---------------- START ----------------
 if __name__ == "__main__":
-    application.run_polling(close_loop=False)
+    application.run_polling()
