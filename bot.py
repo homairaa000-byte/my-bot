@@ -11,11 +11,12 @@ users = {}
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = False
 
-# دالة ذكية تتحقق من صلاحيات المشرفات من داخل المجموعة
+# دالة ذكية تتحقق من صلاحيات المشرفات من داخل المجموعة مباشرة
 async def is_admin(update, context):
     try:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
+        # جلب قائمة المشرفات من تيليجرام
         admins = await context.bot.get_chat_administrators(chat_id)
         return any(admin.user.id == user_id for admin in admins)
     except:
