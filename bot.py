@@ -26,7 +26,7 @@ if not TOKEN:
 # =========================
 # DATA
 # =========================
-registered = set()
+registered = []
 readers = set()
 listeners = set()
 excused = set()
@@ -92,7 +92,6 @@ def menu():
 # =========================
 def build_text():
 
-    # توقيت مكة
     tz = pytz.timezone("Asia/Riyadh")
 
     date_str = datetime.now(tz).strftime(
@@ -100,6 +99,21 @@ def build_text():
     )
 
     status = "🔓 مفتوح" if registration_open else "🔒 مغلق"
+
+    # ترقيم المسجلات
+    registered_text = ""
+
+    if registered:
+
+        for i, name in enumerate(registered, start=1):
+
+            if name in readers:
+                registered_text += f"{i}- {name} ✅\n"
+            else:
+                registered_text += f"{i}- {name}\n"
+
+    else:
+        registered_text = "لا يوجد"
 
     text = (
 
@@ -114,9 +128,8 @@ def build_text():
         "قائمة تسجيل الأدوار 📝\n\n"
 
         "✍️ المسجلات:\n"
-        + ("\n".join(registered)
-           if registered else "لا يوجد")
-        + "\n\n"
+        + registered_text
+        + "\n"
 
         "⛔️ المعتذرات:\n"
         + ("\n".join(excused)
@@ -179,7 +192,7 @@ async def buttons(
     user_name = query.from_user.full_name
 
     # =====================
-    # منع المحظورين
+    # منع المحظور
     # =====================
     if user_name in blocked:
 
@@ -204,7 +217,6 @@ async def buttons(
 
             return
 
-        # تصفير
         if query.data == "reset":
 
             registered.clear()
@@ -212,7 +224,6 @@ async def buttons(
             listeners.clear()
             excused.clear()
 
-        # قفل / فتح
         elif query.data == "toggle":
 
             registration_open = not registration_open
@@ -225,7 +236,7 @@ async def buttons(
         return
 
     # =====================
-    # إذا التسجيل مغلق
+    # التسجيل مغلق
     # =====================
     if not registration_open:
 
@@ -241,7 +252,8 @@ async def buttons(
     # =====================
     if query.data == "register":
 
-        registered.add(user_name)
+        if user_name not in registered:
+            registered.append(user_name)
 
         listeners.discard(user_name)
         excused.discard(user_name)
@@ -252,12 +264,7 @@ async def buttons(
     elif query.data == "read":
 
         if user_name in registered:
-
-            registered.discard(user_name)
-
-            registered.add(
-                f"{user_name} ✅"
-            )
+            readers.add(user_name)
 
     # =====================
     # مستمعة
@@ -266,11 +273,10 @@ async def buttons(
 
         listeners.add(user_name)
 
-        registered.discard(user_name)
-        registered.discard(
-            f"{user_name} ✅"
-        )
+        if user_name in registered:
+            registered.remove(user_name)
 
+        readers.discard(user_name)
         excused.discard(user_name)
 
     # =====================
@@ -280,11 +286,10 @@ async def buttons(
 
         excused.add(user_name)
 
-        registered.discard(user_name)
-        registered.discard(
-            f"{user_name} ✅"
-        )
+        if user_name in registered:
+            registered.remove(user_name)
 
+        readers.discard(user_name)
         listeners.discard(user_name)
 
     # =====================
@@ -292,22 +297,71 @@ async def buttons(
     # =====================
     elif query.data == "remove":
 
-        registered.discard(user_name)
-        registered.discard(
-            f"{user_name} ✅"
-        )
+        if user_name in registered:
+            registered.remove(user_name)
 
         readers.discard(user_name)
         listeners.discard(user_name)
         excused.discard(user_name)
 
     # =====================
-    # تحديث الرسالة
+    # تحديث
     # =====================
     await query.edit_message_text(
         text=build_text(),
         reply_markup=menu()
     )
+
+# =========================
+# BAN
+# =========================
+async def ban(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not await is_admin(update, context):
+        return
+
+    if update.message.reply_to_message:
+
+        user_name = update.message.reply_to_message.from_user.full_name
+
+        blocked.add(user_name)
+
+        if user_name in registered:
+            registered.remove(user_name)
+
+        readers.discard(user_name)
+        listeners.discard(user_name)
+        excused.discard(user_name)
+
+        await update.message.reply_text(
+            build_text(),
+            reply_markup=menu()
+        )
+
+# =========================
+# UNBAN
+# =========================
+async def unban(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not await is_admin(update, context):
+        return
+
+    if update.message.reply_to_message:
+
+        user_name = update.message.reply_to_message.from_user.full_name
+
+        blocked.discard(user_name)
+
+        await update.message.reply_text(
+            build_text(),
+            reply_markup=menu()
+        )
 
 # =========================
 # START
@@ -334,6 +388,14 @@ if __name__ == "__main__":
     )
 
     app.add_handler(
+        CommandHandler("ban", ban)
+    )
+
+    app.add_handler(
+        CommandHandler("unban", unban)
+    )
+
+    app.add_handler(
         CallbackQueryHandler(buttons)
     )
 
@@ -341,4 +403,4 @@ if __name__ == "__main__":
 
     app.run_polling(
         drop_pending_updates=True
-            )
+        )
