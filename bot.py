@@ -47,7 +47,9 @@ def now():
 # ADMIN CHECK
 # =========================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+
     try:
+
         member = await context.bot.get_chat_member(
             update.effective_chat.id,
             user_id
@@ -65,41 +67,53 @@ def build_text():
 
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
 
-    registered_names = "\n".join(
-        [f"• {n}" for n in registered.values()]
-    ) or "لا يوجد"
+    # ===== المسجلات =====
+    registered_names = []
 
-    listeners_names = "\n".join(listeners) or "لا يوجد"
+    for uid, name in registered.items():
 
-    excused_names = "\n".join(excused) or "لا يوجد"
+        if name in readers:
+            registered_names.append(f"✅ {name}")
+        else:
+            registered_names.append(f"• {name}")
 
-    blocked_names = "\n".join(blocked.values()) or "لا يوجد"
+    registered_text = "\n".join(registered_names) or "لا يوجد"
+
+    # ===== المستمعات =====
+    listeners_text = "\n".join(listeners) or "لا يوجد"
+
+    # ===== المعتذرات =====
+    excused_text = "\n".join(excused) or "لا يوجد"
+
+    # ===== المحظورات =====
+    blocked_text = "\n".join(blocked.values()) or "لا يوجد"
 
     return (
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
         "خادم القرآن الرقمي 🤍\n"
         f"📅 {now()}\n\n"
+
         f"{status}\n\n"
 
         "📌 قائمة تسجيل الأدوار\n\n"
 
         "✍️ المسجلات:\n"
-        f"{registered_names}\n\n"
+        f"{registered_text}\n\n"
 
         "🎧 المستمعات:\n"
-        f"{listeners_names}\n\n"
+        f"{listeners_text}\n\n"
 
         "⛔️ المعتذرات:\n"
-        f"{excused_names}\n\n"
+        f"{excused_text}\n\n"
 
         "🚫 المحظورات:\n"
-        f"{blocked_names}\n\n"
+        f"{blocked_text}\n\n"
 
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ﴾"
     )
 
 # =========================
-# BUTTONS
+# MENU
 # =========================
 def menu():
 
@@ -147,13 +161,32 @@ def menu():
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    # رسالة ترحيبية في الخاص فقط
+    if update.effective_chat.type == "private":
+
+        await update.message.reply_text(
+            "🌿 أهلاً بك في خادم القرآن الرقمي 🤍\n\n"
+
+            "📌 طريقة استخدام البوت:\n\n"
+
+            "✍️ سجل : لتسجيل الدور\n"
+            "📖 قرأت : لتأكيد القراءة\n"
+            "🎧 مستمعة : للانتقال إلى قائمة المستمعات\n"
+            "⛔ معتذرة : للاعتذار عن الدور\n\n"
+
+            "🚫 يمنع إرسال الروابط بدون إذن الإشراف\n\n"
+
+            "نسأل الله لنا ولكم القبول والتوفيق 🌷"
+        )
+
+    # إرسال القائمة
     await update.message.reply_text(
         build_text(),
         reply_markup=menu()
     )
 
 # =========================
-# BUTTONS HANDLER
+# BUTTONS
 # =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -167,7 +200,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = q.from_user.first_name
 
     # =====================
-    # BLOCKED CHECK
+    # CHECK BLOCKED
     # =====================
     if uid in blocked:
 
@@ -192,10 +225,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             return
 
+        # ===== قفل / فتح =====
         if q.data == "toggle":
 
             registration_open = not registration_open
 
+        # ===== تصفير =====
         elif q.data == "reset":
 
             registered.clear()
@@ -204,37 +239,63 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             excused.clear()
 
     # =====================
-    # NORMAL ACTIONS
+    # REGISTRATION CLOSED
     # =====================
-    elif registration_open:
-
-        if q.data == "reg":
-
-            registered[uid] = name
-
-        elif q.data == "read":
-
-            if uid in registered:
-                readers.add(name)
-
-        elif q.data == "listen":
-
-            listeners.add(name)
-            registered.pop(uid, None)
-
-        elif q.data == "excused":
-
-            excused.add(name)
-            registered.pop(uid, None)
-
-    else:
+    elif not registration_open:
 
         await q.answer(
             "🔒 التسجيل مغلق",
             show_alert=True
         )
 
+        await q.edit_message_text(
+            build_text(),
+            reply_markup=menu()
+        )
+
         return
+
+    # =====================
+    # سجل
+    # =====================
+    elif q.data == "reg":
+
+        listeners.discard(name)
+        excused.discard(name)
+
+        registered[uid] = name
+
+    # =====================
+    # قرأت
+    # =====================
+    elif q.data == "read":
+
+        if uid in registered:
+            readers.add(name)
+
+    # =====================
+    # مستمعة
+    # =====================
+    elif q.data == "listen":
+
+        listeners.add(name)
+
+        registered.pop(uid, None)
+
+        readers.discard(name)
+        excused.discard(name)
+
+    # =====================
+    # معتذرة
+    # =====================
+    elif q.data == "excused":
+
+        excused.add(name)
+
+        registered.pop(uid, None)
+
+        readers.discard(name)
+        listeners.discard(name)
 
     # =====================
     # UPDATE MESSAGE
@@ -271,7 +332,7 @@ async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         await update.message.reply_text(
-            "🚫🚫🚫 إرسال الروابط غير مسموح"
+            "🚫🚫🚫 إرسال رابط من غير إذن الإشراف يعرضك للحذف أو الحظر"
         )
 
 # =========================
@@ -292,11 +353,23 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         blocked[user.id] = user.first_name
 
+        # حذفها من كل القوائم
         registered.pop(user.id, None)
+
+        readers.discard(user.first_name)
+        listeners.discard(user.first_name)
+        excused.discard(user.first_name)
 
         await update.message.reply_text(
             f"🚫 تم حظر {user.first_name}"
         )
+
+# =========================
+# ERROR HANDLER
+# =========================
+async def error_handler(update, context):
+
+    print("ERROR:", context.error)
 
 # =========================
 # APP
@@ -322,8 +395,10 @@ app.add_handler(
     )
 )
 
+app.add_error_handler(error_handler)
+
 print("BOT RUNNING ✔")
 
 app.run_polling(
     drop_pending_updates=True
-)
+    )
