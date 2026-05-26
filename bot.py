@@ -5,7 +5,8 @@ import pytz
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
+    BotCommand
 )
 
 from telegram.ext import (
@@ -100,7 +101,9 @@ def build_text():
 
     status = "🔓 مفتوح" if registration_open else "🔒 مغلق"
 
+    # =====================
     # ترقيم المسجلات
+    # =====================
     registered_text = ""
 
     if registered:
@@ -115,6 +118,48 @@ def build_text():
     else:
         registered_text = "لا يوجد"
 
+    # =====================
+    # ترقيم المعتذرات
+    # =====================
+    excused_text = ""
+
+    if excused:
+
+        for i, name in enumerate(excused, start=1):
+            excused_text += f"{i}- {name}\n"
+
+    else:
+        excused_text = "لا يوجد"
+
+    # =====================
+    # ترقيم المستمعات
+    # =====================
+    listeners_text = ""
+
+    if listeners:
+
+        for i, name in enumerate(listeners, start=1):
+            listeners_text += f"{i}- {name}\n"
+
+    else:
+        listeners_text = "لا يوجد"
+
+    # =====================
+    # ترقيم المحظورات
+    # =====================
+    blocked_text = ""
+
+    if blocked:
+
+        for i, name in enumerate(blocked, start=1):
+            blocked_text += f"{i}- {name}\n"
+
+    else:
+        blocked_text = "لا يوجد"
+
+    # =====================
+    # النص النهائي
+    # =====================
     text = (
 
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
@@ -132,19 +177,16 @@ def build_text():
         + "\n"
 
         "⛔️ المعتذرات:\n"
-        + ("\n".join(excused)
-           if excused else "لا يوجد")
-        + "\n\n"
+        + excused_text
+        + "\n"
 
         "🎧 المستمعات:\n"
-        + ("\n".join(listeners)
-           if listeners else "لا يوجد")
-        + "\n\n"
+        + listeners_text
+        + "\n"
 
         "🚫 المحظورات:\n"
-        + ("\n".join(blocked)
-           if blocked else "لا يوجد")
-        + "\n\n"
+        + blocked_text
+        + "\n"
 
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا "
         "لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ "
@@ -217,6 +259,7 @@ async def buttons(
 
             return
 
+        # تصفير
         if query.data == "reset":
 
             registered.clear()
@@ -224,6 +267,7 @@ async def buttons(
             listeners.clear()
             excused.clear()
 
+        # قفل / فتح
         elif query.data == "toggle":
 
             registration_open = not registration_open
@@ -236,7 +280,7 @@ async def buttons(
         return
 
     # =====================
-    # التسجيل مغلق
+    # إذا التسجيل مغلق
     # =====================
     if not registration_open:
 
@@ -305,7 +349,7 @@ async def buttons(
         excused.discard(user_name)
 
     # =====================
-    # تحديث
+    # تحديث الرسالة
     # =====================
     await query.edit_message_text(
         text=build_text(),
@@ -364,6 +408,45 @@ async def unban(
         )
 
 # =========================
+# HELP
+# =========================
+async def help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    help_text = (
+
+        "🌿 أهلاً بك في خادم القرآن الرقمي 💫\n\n"
+
+        "📌 طريقة استخدام البوت:\n\n"
+
+        "✍️ سجل اسمي:\n"
+        "لتسجيل اسمك في قائمة التسميع.\n\n"
+
+        "✅ قرأت:\n"
+        "لوضع علامة أنكِ قرأتِ.\n\n"
+
+        "🎧 مستمعة:\n"
+        "لنقلك إلى قائمة المستمعات.\n\n"
+
+        "⛔️ معتذرة:\n"
+        "لنقلك إلى قائمة المعتذرات.\n\n"
+
+        "❌ حذف اسمي:\n"
+        "لحذف اسمك من جميع القوائم.\n\n"
+
+        "📌 أوامر المشرفات:\n"
+        "/ban ← حظر عضوة\n"
+        "/unban ← فك حظر عضوة\n"
+        "/start ← تنزيل القائمة\n\n"
+
+        "💫 بارك الله فيكم جميعًا"
+    )
+
+    await update.message.reply_text(help_text)
+
+# =========================
 # START
 # =========================
 async def start(
@@ -371,10 +454,48 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not await is_admin(update, context):
+
+        await update.message.reply_text(
+            "🚫 هذا الأمر مخصص للمشرفات فقط"
+        )
+
+        return
+
     await update.message.reply_text(
         build_text(),
         reply_markup=menu()
     )
+
+# =========================
+# SET COMMANDS
+# =========================
+async def set_commands(app):
+
+    commands = [
+
+        BotCommand(
+            "help",
+            "شرح طريقة استخدام البوت"
+        ),
+
+        BotCommand(
+            "start",
+            "تنزيل قائمة التسجيل"
+        ),
+
+        BotCommand(
+            "ban",
+            "حظر عضوة"
+        ),
+
+        BotCommand(
+            "unban",
+            "فك حظر عضوة"
+        )
+    ]
+
+    await app.bot.set_my_commands(commands)
 
 # =========================
 # MAIN
@@ -383,8 +504,14 @@ if __name__ == "__main__":
 
     app = Application.builder().token(TOKEN).build()
 
+    app.post_init = set_commands
+
     app.add_handler(
         CommandHandler("start", start)
+    )
+
+    app.add_handler(
+        CommandHandler("help", help_command)
     )
 
     app.add_handler(
@@ -403,4 +530,4 @@ if __name__ == "__main__":
 
     app.run_polling(
         drop_pending_updates=True
-        )
+            )
