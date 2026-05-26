@@ -5,12 +5,14 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# إعداد السجلات لمراقبة الأخطاء بهدوء
+# إعداد السجلات
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN: raise Exception("BOT_TOKEN missing")
+if not TOKEN: 
+    raise Exception("BOT_TOKEN غير موجود في متغيرات البيئة!")
 
+# البيانات الأساسية
 users = {} 
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = True
@@ -27,8 +29,7 @@ def build_text():
         f"📅 {now()}\n\n{status}\n\n📌 قائمة تسجيل الأدوار\n\n"
         "✍️ المسجلات:\n" + ("\n".join(reg_names) or "لا يوجد") + "\n\n"
         "🎧 المستمعات:\n" + ("\n".join(users.get(uid, "") for uid in listeners) or "لا يوجد") + "\n\n"
-        "⛔️ المعتذرات:\n" + ("\n".join(users.get(uid, "") for uid in excused) or "لا يوجد") + "\n\n"
-        "🚫 المحظورات:\n" + ("\n".join(users.get(uid, "") for uid in blocked) or "لا يوجد") + "\n"
+        "⛔️ المعتذرات:\n" + ("\n".join(users.get(uid, "") for uid in excused) or "لا يوجد") + "\n"
     )
 
 def menu():
@@ -38,8 +39,6 @@ def menu():
     ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type == "private":
-        await update.message.reply_text("خادم القرآن الرقمي 💫")
     await update.message.reply_text(build_text(), reply_markup=menu())
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -47,12 +46,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     uid, name = q.from_user.id, q.from_user.first_name
+    
     if uid in blocked: return
-    if not registration_open: await q.answer("🔒 التسجيل مغلق", show_alert=True); return
+    if not registration_open: 
+        await q.answer("🔒 التسجيل مغلق", show_alert=True)
+        return
+        
     if q.data == "reg": users[uid] = name; registered.add(uid)
     elif q.data == "read" and uid in registered: readers.add(uid)
     elif q.data == "listen": listeners.add(uid); registered.discard(uid); readers.discard(uid); excused.discard(uid)
     elif q.data == "excused": excused.add(uid); registered.discard(uid); readers.discard(uid); listeners.discard(uid)
+    
     await q.edit_message_text(build_text(), reply_markup=menu())
 
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,12 +66,15 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("تم الحظر")
 
 if __name__ == '__main__':
-    # بناء التطبيق مع توقيت تشغيل ثابت
+    # بناء التطبيق
     app = Application.builder().token(TOKEN).concurrent_updates(False).build()
+    
+    # إضافة الأوامر
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban))
     app.add_handler(CallbackQueryHandler(buttons))
     
     print("BOT RUNNING ✔")
-    # drop_pending_updates تمسح أي رسائل قديمة عالقة عند إعادة التشغيل
+    
+    # drop_pending_updates=True هي المفتاح لمسح التعارض مع أي اتصالات قديمة
     app.run_polling(drop_pending_updates=True)
