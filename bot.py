@@ -6,14 +6,16 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-# ضعي هنا أرقام الـ ID للمشرفات (أرقام فقط)
-ADMINS = {123456789, 987654321} 
 
 users = {}
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = False
 
-def is_admin(user_id): return user_id in ADMINS
+async def is_admin(update, context):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    admins = await context.bot.get_chat_administrators(chat_id)
+    return any(admin.user.id == user_id for admin in admins)
 
 def build_text():
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
@@ -44,7 +46,7 @@ async def buttons(update, context):
     if uid in blocked: return
     
     if q.data in ["toggle", "reset"]:
-        if not is_admin(uid): await q.answer("🚫 للمشرفات فقط!", show_alert=True); return
+        if not await is_admin(update, context): await q.answer("🚫 للمشرفات فقط!", show_alert=True); return
         global registration_open
         if q.data == "toggle": registration_open = not registration_open
         else: registered.clear(); readers.clear(); listeners.clear(); excused.clear()
@@ -57,13 +59,13 @@ async def buttons(update, context):
     await q.edit_message_text(build_text(), reply_markup=menu())
 
 async def ban_user(update, context):
-    if is_admin(update.message.from_user.id) and update.message.reply_to_message:
+    if await is_admin(update, context) and update.message.reply_to_message:
         t = update.message.reply_to_message.from_user
         blocked.add(t.id); users[t.id] = t.first_name
         await update.message.reply_text(f"تم حظر {t.first_name}")
 
 async def handle_links(update, context):
-    if not is_admin(update.message.from_user.id) and re.search(r'http[s]?://', update.message.text or ""):
+    if not await is_admin(update, context) and re.search(r'http[s]?://', update.message.text or ""):
         await update.message.delete()
         await update.message.reply_text(f"🚫 تنبيه: إرسال الروابط ممنوع!")
 
