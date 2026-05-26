@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-# ضعي هنا أرقام الـ ID للمشرفات (أرقام فقط بدون فواصل إضافية)
+# ضعي هنا أرقام الـ ID للمشرفات (أرقام فقط)
 ADMINS = {123456789, 987654321} 
 
 users = {}
@@ -21,7 +21,7 @@ def build_text():
     
     return (
         "خادم القرآن الرقمي 💫\n"
-        f"📅 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n{status}\n\n"
+        f"📅 {datetime.datetime.now(pytz.timezone('Asia/Riyadh')).strftime('%Y-%m-%d %H:%M')}\n\n{status}\n\n"
         "✍️ المسجلات:\n" + ("\n".join([f"{i}- {users.get(uid, 'عضوة')}{' ✅' if uid in readers else ''}" for i, uid in enumerate(registered, 1)])) + "\n\n"
         "🎧 المستمعات:\n" + fmt(listeners) + "\n\n"
         "⛔️ المعتذرات:\n" + fmt(excused) + "\n\n"
@@ -29,14 +29,14 @@ def build_text():
         "{ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا }\n"
     )
 
-async def start(update, context): await update.message.reply_text(build_text(), reply_markup=menu())
-
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("قرأت ✅", callback_data="read"), InlineKeyboardButton("سجل اسمي 📝", callback_data="reg")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listen"), InlineKeyboardButton("⛔ معتذرة", callback_data="excused")],
         [InlineKeyboardButton("قفل/فتح 🔒", callback_data="toggle"), InlineKeyboardButton("تصفير 🧹", callback_data="reset")]
     ])
+
+async def start(update, context): await update.message.reply_text(build_text(), reply_markup=menu())
 
 async def buttons(update, context):
     q = update.callback_query
@@ -65,7 +65,7 @@ async def ban_user(update, context):
 async def handle_links(update, context):
     if not is_admin(update.message.from_user.id) and re.search(r'http[s]?://', update.message.text or ""):
         await update.message.delete()
-        await update.message.reply_text(f"🚫 تنبيه: إرسال الروابط ممنوع دون إذن!")
+        await update.message.reply_text(f"🚫 تنبيه: إرسال الروابط ممنوع!")
 
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
