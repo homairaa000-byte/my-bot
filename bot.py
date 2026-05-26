@@ -4,6 +4,7 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
+# التوكين من المتغيرات
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN: raise Exception("BOT_TOKEN missing")
 
@@ -34,7 +35,6 @@ def build_text():
     )
 
 def menu():
-    # الأزرار مرتبة كما طلبتِ
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("سجل اسمي 📝", callback_data="reg"), InlineKeyboardButton("قرأت ✅", callback_data="read")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listen"), InlineKeyboardButton("⛔ معتذرة", callback_data="excused")]
@@ -76,9 +76,12 @@ async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         blocked.discard(target.id)
         await update.message.reply_text(build_text(), reply_markup=menu())
 
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ban", ban))
-app.add_handler(CommandHandler("unban", unban))
-app.add_handler(CallbackQueryHandler(buttons))
-app.run_polling(drop_pending_updates=True)
+# تشغيل البوت مع مسح أي تحديثات معلقة لمنع تكرار الخطأ
+if __name__ == '__main__':
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ban", ban))
+    app.add_handler(CommandHandler("unban", unban))
+    app.add_handler(CallbackQueryHandler(buttons))
+    print("BOT RUNNING ✔")
+    app.run_polling(drop_pending_updates=True)
