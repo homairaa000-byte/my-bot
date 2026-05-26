@@ -7,21 +7,22 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+# تعريف المجموعات
 users = {}
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = False
 
-# دالة ذكية تتحقق من صلاحيات المشرفات من داخل المجموعة مباشرة
+# دالة التحقق من المشرفين
 async def is_admin(update, context):
     try:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
-        # جلب قائمة المشرفات من تيليجرام
         admins = await context.bot.get_chat_administrators(chat_id)
         return any(admin.user.id == user_id for admin in admins)
     except:
         return False
 
+# بناء نص القائمة
 def build_text():
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
     def fmt(s): return "\n".join([f"{i}- {users.get(uid, 'عضوة')}" for i, uid in enumerate(s, 1)]) if s else "لا يوجد"
@@ -80,4 +81,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_links))
     app.add_handler(CallbackQueryHandler(buttons))
+    
+    # الحل الجذري: drop_pending_updates=True يمسح الاتصالات العالقة
     app.run_polling(drop_pending_updates=True)
