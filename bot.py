@@ -2,31 +2,27 @@ import os
 import re
 import datetime
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-# تعريف المجموعات
 users = {}
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = False
 
-# دالة التحقق من المشرفين
 async def is_admin(update, context):
     try:
-        user_id = update.effective_user.id
+        user = update.effective_user
         chat_id = update.effective_chat.id
         admins = await context.bot.get_chat_administrators(chat_id)
-        return any(admin.user.id == user_id for admin in admins)
+        return any(admin.user.id == user.id for admin in admins)
     except:
         return False
 
-# بناء نص القائمة
 def build_text():
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
     def fmt(s): return "\n".join([f"{i}- {users.get(uid, 'عضوة')}" for i, uid in enumerate(s, 1)]) if s else "لا يوجد"
-    
     return (
         "خادم القرآن الرقمي 💫\n"
         f"📅 {datetime.datetime.now(pytz.timezone('Asia/Riyadh')).strftime('%Y-%m-%d %H:%M')}\n\n{status}\n\n"
@@ -50,7 +46,6 @@ async def buttons(update, context):
     q = update.callback_query
     uid, name = q.from_user.id, q.from_user.first_name
     if uid in blocked: return
-    
     if q.data in ["toggle", "reset"]:
         if not await is_admin(update, context): await q.answer("🚫 للمشرفات فقط!", show_alert=True); return
         global registration_open
@@ -61,7 +56,6 @@ async def buttons(update, context):
         elif q.data == "read": readers.add(uid)
         elif q.data == "listen": listeners.add(uid); registered.discard(uid); readers.discard(uid); excused.discard(uid)
         elif q.data == "excused": excused.add(uid); registered.discard(uid); readers.discard(uid); listeners.discard(uid)
-    
     await q.edit_message_text(build_text(), reply_markup=menu())
 
 async def ban_user(update, context):
@@ -81,6 +75,4 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_links))
     app.add_handler(CallbackQueryHandler(buttons))
-    
-    # الحل الجذري: drop_pending_updates=True يمسح الاتصالات العالقة
     app.run_polling(drop_pending_updates=True)
