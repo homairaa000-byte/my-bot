@@ -11,11 +11,15 @@ users = {}
 registered, readers, listeners, excused, blocked = set(), set(), set(), set(), set()
 registration_open = False
 
+# دالة ذكية تتحقق من صلاحيات المشرفات من داخل المجموعة
 async def is_admin(update, context):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    admins = await context.bot.get_chat_administrators(chat_id)
-    return any(admin.user.id == user_id for admin in admins)
+    try:
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        admins = await context.bot.get_chat_administrators(chat_id)
+        return any(admin.user.id == user_id for admin in admins)
+    except:
+        return False
 
 def build_text():
     status = "🔓 التسجيل مفتوح" if registration_open else "🔒 التسجيل مغلق"
