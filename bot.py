@@ -15,7 +15,7 @@ async def is_admin(update, context):
     try:
         user = update.effective_user
         chat_id = update.effective_chat.id
-        # جلب قائمة المشرفين من المجموعة مباشرة
+        # يتحقق من صلاحية المشرف في تيليجرام تلقائياً
         admins = await context.bot.get_chat_administrators(chat_id)
         return any(admin.user.id == user.id for admin in admins)
     except:
@@ -59,9 +59,22 @@ async def buttons(update, context):
         elif q.data == "excused": excused.add(uid); registered.discard(uid); readers.discard(uid); listeners.discard(uid)
     await q.edit_message_text(build_text(), reply_markup=menu())
 
+async def ban_user(update, context):
+    if await is_admin(update, context) and update.message.reply_to_message:
+        t = update.message.reply_to_message.from_user
+        blocked.add(t.id); users[t.id] = t.first_name
+        await update.message.reply_text(f"تم حظر {t.first_name}")
+
+async def handle_links(update, context):
+    if not await is_admin(update, context) and re.search(r'http[s]?://', update.message.text or ""):
+        await update.message.delete()
+        await update.message.reply_text(f"🚫 تنبيه: إرسال الروابط ممنوع!")
+
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ban", ban_user))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_links))
     app.add_handler(CallbackQueryHandler(buttons))
-    # هذا السطر هو الحل الجذري للـ Conflict
+    # التشغيل مع تجاهل الأخطاء القديمة (الحل النهائي للتعارض)
     app.run_polling(drop_pending_updates=True)
