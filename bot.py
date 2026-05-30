@@ -16,12 +16,15 @@ from telegram.ext import (
     ContextTypes
 )
 
+# =========================
+# TOKEN
+# =========================
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
 
 # =========================
-# DATA STORAGE (لكل مجموعة بياناتها)
+# DATA (قاموس المجموعات)
 # =========================
 chat_data = {}
 
@@ -61,10 +64,13 @@ def build_text(chat_id):
     date_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     status = "🔓 مفتوح" if data["registration_open"] else "🔒 مغلق"
 
-    def format_list(items):
+    def format_list(items, is_registered=False):
         if not items: return "لا يوجد"
-        return "\n".join([f"{i}- {name}" + (" ✅" if name in data["readers"] and items == data["registered"] else "") 
-                          for i, name in enumerate(items, start=1)])
+        result = ""
+        for i, name in enumerate(items, start=1):
+            check = " ✅" if (is_registered and name in data["readers"]) else ""
+            result += f"{i}- {name}{check}\n"
+        return result
 
     text = (
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
@@ -72,26 +78,25 @@ def build_text(chat_id):
         "خادم القرآن الرقمي 💫\n\n"
         f"التسجيل {status}\n\n"
         "قائمة تسجيل الأدوار 📝\n\n"
-        "✍️ المسجلات:\n" + format_list(data["registered"]) + "\n\n"
-        "⛔️ المعتذرات:\n" + format_list(list(data["excused"])) + "\n\n"
-        "🎧 المستمعات:\n" + format_list(list(data["listeners"])) + "\n\n"
-        "🚫 المحظورات:\n" + format_list(list(data["blocked"])) + "\n\n"
+        "✍️ المسجلات:\n" + format_list(data["registered"], True) + "\n"
+        "⛔️ المعتذرات:\n" + format_list(list(data["excused"])) + "\n"
+        "🎧 المستمعات:\n" + format_list(list(data["listeners"])) + "\n"
+        "🚫 المحظورات:\n" + format_list(list(data["blocked"])) + "\n"
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾"
     )
     return text
 
 # =========================
-# ADMIN CHECK
+# UTILS
 # =========================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         admins = await context.bot.get_chat_administrators(update.effective_chat.id)
         return any(admin.user.id == update.effective_user.id for admin in admins)
-    except:
-        return False
+    except: return False
 
 # =========================
-# BUTTONS
+# HANDLERS
 # =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -122,7 +127,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("🔒 التسجيل مغلق", show_alert=True)
         return
 
-    # منطق الأزرار
     if query.data == "register":
         if user_name not in data["registered"]: data["registered"].append(user_name)
         data["listeners"].discard(user_name)
@@ -147,8 +151,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(text=build_text(chat_id), reply_markup=menu())
 
-# (بقية الدوال: ban, unban, start, help يرجى تمرير chat_id لها بنفس الطريقة)
-# مثال لتعديل ban:
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     data = get_data(chat_id)
@@ -156,7 +158,41 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         user_name = update.message.reply_to_message.from_user.full_name
         data["blocked"].add(user_name)
-        # ... مسح الاسم من القوائم الأخرى
+        if user_name in data["registered"]: data["registered"].remove(user_name)
+        data["readers"].discard(user_name)
+        data["listeners"].discard(user_name)
+        data["excused"].discard(user_name)
         await update.message.reply_text(build_text(chat_id), reply_markup=menu())
 
-# ... (أكمل باقي الدوال بنفس نمط تمرير chat_id)
+async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    data = get_data(chat_id)
+    if not await is_admin(update, context): return
+    if update.message.reply_to_message:
+        user_name = update.message.reply_to_message.from_user.full_name
+        data["blocked"].discard(user_name)
+        await update.message.reply_text(build_text(chat_id), reply_markup=menu())
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not await is_admin(update, context):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفات فقط")
+        return
+    await update.message.reply_text(build_text(chat_id), reply_markup=menu())
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = "🌿 أهلاً بك في خادم القرآن الرقمي 💫\n\n📌 أوامر المشرفات:\n/ban /unban /start\n💫 بارك الله فيكم"
+    await update.message.reply_text(help_text)
+
+# =========================
+# MAIN
+# =========================
+if __name__ == "__main__":
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("ban", ban))
+    app.add_handler(CommandHandler("unban", unban))
+    app.add_handler(CallbackQueryHandler(buttons))
+    print("BOT RUNNING ✔")
+    app.run_polling(drop_pending_updates=True)
