@@ -16,7 +16,12 @@ TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
 DB = "bot.db"
 
-# تهيئة
+# تهيئة Flask للصحة (لإبقاء الخدمة حية على Render)
+app_health = Flask(__name__)
+@app_health.route('/')
+def health(): return "Bot is live!", 200
+
+# تهيئة البيانات
 try:
     r = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), decode_responses=True)
 except: r = None
@@ -93,7 +98,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init()
-    threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=PORT), daemon=True).start()
+    # تشغيل Flask كخادم صحة في الخلفية
+    threading.Thread(target=lambda: app_health.run(host="0.0.0.0", port=PORT), daemon=True).start()
+    
+    # تشغيل البوت
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
