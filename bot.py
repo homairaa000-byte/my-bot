@@ -8,9 +8,6 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
-# =========================
-# الإعدادات
-# =========================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -18,30 +15,19 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
-# =========================
-# Telegram App
-# =========================
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
-
-# =========================
-# بيانات الدوال
-# =========================
 chat_data = {}
 
 def get_data(chat_id):
     if chat_id not in chat_data:
-        chat_data[chat_id] = {
-            "registered": {}, "readers": set(), "listeners": {},
-            "excused": {}, "blocked": set(), "registration_open": True,
-        }
+        chat_data[chat_id] = {"registered": {}, "readers": set(), "listeners": {}, "excused": {}, "blocked": set(), "registration_open": True}
     return chat_data[chat_id]
 
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ سجل اسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle")],
-        [InlineKeyboardButton("❌ حذف", callback_data="remove")]
+        [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("❌ حذف", callback_data="remove")]
     ])
 
 def fmt(d): return "لا يوجد" if not d else "\n".join(f"{i+1}- {n}" for i, n in enumerate(d.values()))
@@ -57,53 +43,34 @@ def build_text(chat_id):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query: return
-    await query.answer()
-    
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     name = update.effective_user.full_name
     data = get_data(chat_id)
     
-    if user_id in data["blocked"]:
-        await query.answer("أنت محظورة", show_alert=True)
-        return
-        
     def clear():
         data["registered"].pop(user_id, None); data["listeners"].pop(user_id, None)
         data["excused"].pop(user_id, None); data["readers"].discard(user_id)
     
-    try:
-        if query.data == "register":
-            if not data["registration_open"]: await query.answer("التسجيل مغلق", show_alert=True)
-            else: clear(); data["registered"][user_id] = name
-        elif query.data == "read":
-            if user_id not in data["registered"]: await query.answer("سجل اسمك أولاً", show_alert=True)
-            else:
-                if user_id in data["readers"]: data["readers"].remove(user_id)
-                else: data["readers"].add(user_id)
-        elif query.data == "listener": clear(); data["listeners"][user_id] = name
-        elif query.data == "excused": clear(); data["excused"][user_id] = name
-        elif query.data == "remove": clear()
-        elif query.data == "reset": data["registered"].clear(); data["listeners"].clear(); data["excused"].clear(); data["readers"].clear()
-        elif query.data == "toggle": data["registration_open"] = not data["registration_open"]
-        
-        await query.edit_message_text(build_text(chat_id), reply_markup=menu())
-    except Exception as e:
-        logger.error(f"Callback error: {e}")
+    if query.data == "register": clear(); data["registered"][user_id] = name
+    elif query.data == "read":
+        if user_id in data["readers"]: data["readers"].remove(user_id)
+        else: data["readers"].add(user_id)
+    elif query.data == "listener": clear(); data["listeners"][user_id] = name
+    elif query.data == "excused": clear(); data["excused"][user_id] = name
+    elif query.data == "remove": clear()
+    elif query.data == "reset": data["registered"].clear(); data["listeners"].clear(); data["excused"].clear(); data["readers"].clear()
+    
+    await query.answer("تمت العملية!")
+    # الحل: إرسال رسالة جديدة دائماً لضمان الظهور
+    await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
 
-# =========================
-# هيكل Flask
-# =========================
 app = Flask(__name__)
-
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(data=request.get_json(force=True), bot=application.bot)
     asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot_data['loop'])
     return "OK", 200
-
-@app.route("/")
-def index(): return "Bot is running", 200
 
 async def start_bot():
     application.add_handler(CallbackQueryHandler(buttons))
