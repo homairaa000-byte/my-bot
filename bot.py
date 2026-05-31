@@ -58,8 +58,8 @@ def get_data(chat_id):
         chat_data[chat_id] = {
             "registered": {},   # id -> name
             "readers": set(),   # ids
-            "listeners": {},
-            "excused": {},
+            "listeners": {},    # id -> name
+            "excused": {},      # id -> name
             "blocked": set(),   # ids
             "blocked_names": {},
             "registration_open": True,
@@ -101,13 +101,17 @@ def fmt(d):
     return "\n".join(f"{i+1}- {name}" for i, name in enumerate(d.values()))
 
 
+def fmt_list(s):
+    if not s:
+        return "لا يوجد"
+    return "\n".join(f"{i+1}- {uid}" for i, uid in enumerate(s))
+
+
 def build_text(chat_id):
     data = get_data(chat_id)
 
     tz = pytz.timezone("Africa/Tripoli")
     date_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
-
-    blocked_names = list(data["blocked_names"].values())
 
     return (
         f"📅 {date_str}\n\n"
@@ -115,25 +119,22 @@ def build_text(chat_id):
         f"✍️ المسجلات:\n{fmt(data['registered'])}\n\n"
         f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n"
         f"🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
-        f"🚫 المحظورات:\n{fmt({'x': n for n in blocked_names})}"
+        f"✅ قرأت:\n{fmt_list(data['readers'])}\n"
     )
 
 
 # =========================
-# Webhook setup (حل Conflict)
+# webhook setup
 # =========================
 
 async def setup_webhook():
     await application.initialize()
 
-    # 🔥 مهم جدًا لمنع Conflict
     await application.bot.delete_webhook(drop_pending_updates=True)
 
     await application.bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
     )
-
-    await application.start()
 
 
 # =========================
@@ -146,7 +147,6 @@ def webhook():
         request.get_json(force=True),
         application.bot,
     )
-
     asyncio.run(application.process_update(update))
     return "OK"
 
@@ -157,7 +157,7 @@ def home():
 
 
 # =========================
-# Callback
+# Callback system
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,12 +171,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = get_data(chat_id)
 
-    # 🚫 حظر
     if user_id in data["blocked"]:
         await query.answer("أنتِ محظورة!", show_alert=True)
         return
 
-    # إزالة من كل القوائم
     def clear_user():
         data["registered"].pop(user_id, None)
         data["listeners"].pop(user_id, None)
@@ -192,18 +190,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_user()
         data["registered"][user_id] = user_name
 
-    # ================= READ TOGGLE =================
+    # ================= READ TOGGLE (مهم جداً) =================
     elif query.data == "read":
 
         if user_id not in data["registered"]:
             await query.answer("سجلي اسمك أولاً", show_alert=True)
             return
 
-        # 🔁 toggle
         if user_id in data["readers"]:
             data["readers"].remove(user_id)
+            await query.answer("تم إلغاء علامة قرأت")
         else:
             data["readers"].add(user_id)
+            await query.answer("تم تسجيل قرأت")
 
     # ================= LISTENER =================
     elif query.data == "listener":
@@ -220,17 +219,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_user()
 
     # ================= ADMIN =================
-    elif query.data in ["reset", "toggle"]:
+    elif query.data == "reset":
+        data["registered"].clear()
+        data["listeners"].clear()
+        data["excused"].clear()
+        data["readers"].clear()
 
-        # (هنا ممكن تضيف check admin لاحقًا)
-        if query.data == "toggle":
-            data["registration_open"] = not data["registration_open"]
-
-        elif query.data == "reset":
-            data["registered"].clear()
-            data["listeners"].clear()
-            data["excused"].clear()
-            data["readers"].clear()
+    elif query.data == "toggle":
+        data["registration_open"] = not data["registration_open"]
 
     await query.edit_message_text(
         build_text(chat_id),
@@ -239,9 +235,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# تشغيل webhook
+# تشغيل
 # =========================
 
 if __name__ == "__main__":
+    application.add_handler(CallbackQueryHandler(buttons))
+
     asyncio.run(setup_webhook())
+
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
