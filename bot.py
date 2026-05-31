@@ -19,7 +19,6 @@ def db(): return sqlite3.connect(DB, check_same_thread=False)
 
 def init():
     with db() as conn:
-        # إضافة عمود read_status لتتبع علامة الصح
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 
 def fetch(chat_id):
@@ -33,7 +32,8 @@ def build(chat_id):
         for n, st, b, rd in data:
             if banned and b == 1: res.append(n)
             elif not banned and st == s:
-                mark = " ✅" if rd == 1 else ""
+                # تظهر العلامة فقط للمسجلات (register) اللاتي ضغطن على قرأت
+                mark = " ✅" if (rd == 1 and s == 'register') else ""
                 res.append(f"{n}{mark}")
         return "لا يوجد" if not res else "\n".join(f"{i+1}- {item}" for i, item in enumerate(res))
     
@@ -45,9 +45,9 @@ def build(chat_id):
 
 def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ سجل اسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
+        [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")],
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
@@ -59,11 +59,17 @@ async def buttons(update, context):
     
     with db() as conn:
         if data in ["register", "listener", "excused"]:
+            # عند التسجيل الجديد، نضبط الحالة ونصفر علامة الصح
             conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", 
                          (chat_id, user_id, q.from_user.full_name, data))
         elif data == "read":
-            # تبديل حالة علامة الصح
-            conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=? AND status='register'", (chat_id, user_id))
+            # التحقق: هل العضوة مسجلة في قائمة المسجلات؟
+            user = conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
+            if user and user[0] == 'register':
+                conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+            else:
+                await q.answer("❌ يجب تسجيل اسمك أولاً في 'المسجلات' لتتمكني من وضع علامة الصح!", show_alert=True)
+                return
         elif data == "remove":
             conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
         elif data == "reset":
@@ -73,4 +79,5 @@ async def buttons(update, context):
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-# ... (باقي الأوامر start و help كما هي)
+# يجب التأكد من ربط الدالة بالـ Handler في الـ main
+# app.add_handler(CallbackQueryHandler(buttons))
