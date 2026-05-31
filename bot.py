@@ -8,6 +8,7 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+# إعداد السجلات
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -15,6 +16,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
+# تهيئة التطبيق
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 chat_data = {}
 
@@ -66,19 +68,23 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
-    except: pass
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
     
     await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
 
+# --- جزء الربط مع تليجرام و Flask ---
 app = Flask(__name__)
+loop = asyncio.new_event_loop()
 
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(data=request.get_json(force=True), bot=application.bot)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot_data['loop'])
+    # استخدام loop المهيأ مسبقاً
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     return "OK", 200
 
-async def start_bot():
+async def setup_bot():
     await application.bot.delete_webhook()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(buttons))
@@ -87,8 +93,6 @@ async def start_bot():
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook/{TOKEN}")
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    application.bot_data['loop'] = loop
-    threading.Thread(target=lambda: loop.run_until_complete(start_bot()), daemon=True).start()
+    # تشغيل تهيئة البوت في الـ loop الرئيسي
+    loop.run_until_complete(setup_bot())
     app.run(host="0.0.0.0", port=PORT)
