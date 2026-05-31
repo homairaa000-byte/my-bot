@@ -4,17 +4,14 @@ from datetime import datetime
 
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 # =========================
 # إعدادات
 # =========================
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -23,7 +20,6 @@ if not TOKEN or not WEBHOOK_URL:
     raise Exception("Missing BOT_TOKEN or WEBHOOK_URL")
 
 WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
-
 PORT = int(os.environ.get("PORT", 10000))
 
 # =========================
@@ -99,8 +95,11 @@ def build_text(chat_id):
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
+
+    if not query:
+        return
+
     await query.answer()
 
     chat_id = update.effective_chat.id
@@ -119,63 +118,85 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["excused"].pop(user_id, None)
         data["readers"].discard(user_id)
 
-    if query.data == "register":
-        if not data["registration_open"]:
-            await query.answer("التسجيل مغلق", show_alert=True)
-            return
-        clear()
-        data["registered"][user_id] = name
+    try:
 
-    elif query.data == "read":
-        if user_id not in data["registered"]:
-            await query.answer("سجل اسمك أولاً", show_alert=True)
-            return
+        if query.data == "register":
+            if not data["registration_open"]:
+                await query.answer("التسجيل مغلق", show_alert=True)
+                return
+            clear()
+            data["registered"][user_id] = name
 
-        if user_id in data["readers"]:
-            data["readers"].remove(user_id)
-            await query.answer("تم إلغاء قرأت")
-        else:
-            data["readers"].add(user_id)
-            await query.answer("تم تسجيل قرأت")
+        elif query.data == "read":
+            if user_id not in data["registered"]:
+                await query.answer("سجل اسمك أولاً", show_alert=True)
+                return
 
-    elif query.data == "listener":
-        clear()
-        data["listeners"][user_id] = name
+            if user_id in data["readers"]:
+                data["readers"].remove(user_id)
+                await query.answer("تم إلغاء قرأت")
+            else:
+                data["readers"].add(user_id)
+                await query.answer("تم تسجيل قرأت")
 
-    elif query.data == "excused":
-        clear()
-        data["excused"][user_id] = name
+        elif query.data == "listener":
+            clear()
+            data["listeners"][user_id] = name
 
-    elif query.data == "remove":
-        clear()
+        elif query.data == "excused":
+            clear()
+            data["excused"][user_id] = name
 
-    elif query.data == "reset":
-        data["registered"].clear()
-        data["listeners"].clear()
-        data["excused"].clear()
-        data["readers"].clear()
+        elif query.data == "remove":
+            clear()
 
-    elif query.data == "toggle":
-        data["registration_open"] = not data["registration_open"]
+        elif query.data == "reset":
+            data["registered"].clear()
+            data["listeners"].clear()
+            data["excused"].clear()
+            data["readers"].clear()
 
-    await query.edit_message_text(
-        build_text(chat_id),
-        reply_markup=menu()
-    )
+        elif query.data == "toggle":
+            data["registration_open"] = not data["registration_open"]
+
+        await query.edit_message_text(
+            build_text(chat_id),
+            reply_markup=menu()
+        )
+
+    except Exception as e:
+        logger.error(f"Callback error: {e}")
 
 # =========================
-# WEBHOOK (الطريقة الصحيحة 100%)
+# WEBHOOK (FIXED + SAFE)
 # =========================
+
+WEBHOOK_LOCK = False
 
 async def post_init(app: Application):
-    await app.bot.delete_webhook(drop_pending_updates=True)
+    global WEBHOOK_LOCK
 
-    await app.bot.set_webhook(
-        url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
-    )
+    if WEBHOOK_LOCK:
+        return
+
+    try:
+        logger.info("Setting webhook...")
+
+        await app.bot.delete_webhook(drop_pending_updates=True)
+
+        # مهم: منع Flood
+        await app.bot.set_webhook(
+            url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
+        )
+
+        WEBHOOK_LOCK = True
+        logger.info("Webhook set successfully")
+
+    except Exception as e:
+        logger.error(f"Webhook setup error: {e}")
 
 # =========================
-# تشغيل webhook مباشرة (بدون Flask)
+# تشغيل
 # =========================
 
 def main():
