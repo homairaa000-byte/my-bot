@@ -8,7 +8,6 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-# إعدادات التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -16,13 +15,13 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
-# بناء التطبيق
+# إعداد التطبيق
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 chat_data = {}
 
 def get_data(chat_id):
     if chat_id not in chat_data:
-        chat_data[chat_id] = {"registered": {}, "readers": set(), "listeners": {}, "excused": {}, "blocked": set(), "registration_open": True}
+        chat_data[chat_id] = {"registered": {}, "readers": set(), "listeners": {}, "excused": {}, "registration_open": True}
     return chat_data[chat_id]
 
 def menu():
@@ -53,17 +52,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.full_name
     data = get_data(chat_id)
     
-    def clear():
-        data["registered"].pop(user_id, None); data["listeners"].pop(user_id, None)
-        data["excused"].pop(user_id, None); data["readers"].discard(user_id)
-    
-    if query.data == "register": clear(); data["registered"][user_id] = name
+    if query.data == "register": data["registered"][user_id] = name
     elif query.data == "read":
         if user_id in data["readers"]: data["readers"].remove(user_id)
         else: data["readers"].add(user_id)
-    elif query.data == "listener": clear(); data["listeners"][user_id] = name
-    elif query.data == "excused": clear(); data["excused"][user_id] = name
-    elif query.data == "remove": clear()
+    elif query.data == "listener": data["listeners"][user_id] = name
+    elif query.data == "excused": data["excused"][user_id] = name
+    elif query.data == "remove": 
+        data["registered"].pop(user_id, None); data["listeners"].pop(user_id, None); data["excused"].pop(user_id, None); data["readers"].discard(user_id)
     elif query.data == "reset": data["registered"].clear(); data["listeners"].clear(); data["excused"].clear(); data["readers"].clear()
     
     await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
@@ -75,9 +71,6 @@ def webhook():
     update = Update.de_json(data=request.get_json(force=True), bot=application.bot)
     asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot_data['loop'])
     return "OK", 200
-
-@app.route("/")
-def home(): return "Bot is live", 200
 
 async def start_bot():
     application.add_handler(CommandHandler("start", start))
