@@ -8,7 +8,7 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-# إعدادات التسجيل لمتابعة الأخطاء
+# إعدادات التسجيل - مهم جداً لمراقبة الخطأ
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -16,7 +16,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
-# بناء التطبيق
+# بناء التطبيق - تم تفعيل تحديثات متزامنة لضمان الاستقرار
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 chat_data = {}
 
@@ -42,8 +42,8 @@ def build_text(chat_id):
             f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
             f"✅ قرأت:\n{fmt_set(data['readers'])}")
 
-# الأوامر والأزرار
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # إرسال الرسالة مباشرة
     await context.bot.send_message(chat_id=update.effective_chat.id, text=build_text(update.effective_chat.id), reply_markup=menu())
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,33 +67,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["registered"].clear(); data["listeners"].clear(); 
         data["excused"].clear(); data["readers"].clear()
     
+    # حذف الرسالة القديمة ثم إرسال الجديدة
     try:
-        # حذف الرسالة القديمة لتجنب التكرار
         await context.bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Delete message failed: {e}")
     
     await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
 
-# تشغيل الويب هوك
 app = Flask(__name__)
+
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
+    # استخدام thread-safe لضمان عدم انقطاع المعالجة
     update = Update.de_json(data=request.get_json(force=True), bot=application.bot)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot_data['loop'])
-    return "OK", 200
-
-async def start_bot():
-    # تنظيف الويب هوك القديم والبدء من جديد
-    await application.bot.delete_webhook()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(buttons))
-    await application.initialize()
-    await application.start()
-    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook/{TOKEN}")
-
-if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    application.bot_data['loop'] = loop
-    threading.Thread(target=lambda: loop.run_until_complete(start_bot()), daemon=True).start()
-    app.run(host="0.0.0.0", port=PORT)
+    asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot_data['
