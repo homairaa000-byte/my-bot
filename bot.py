@@ -11,7 +11,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 # =========================
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("V4_PRO_BOT")
 
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -47,7 +47,7 @@ def get_data(chat_id):
     return chat_data[chat_id]
 
 # =========================
-# UI
+# UI (نفس التصميم الأصلي)
 # =========================
 
 def menu():
@@ -91,12 +91,12 @@ def build_text(chat_id):
     )
 
 # =========================
-# Callback Handler
+# Callback Handler (محمي)
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
 
+    query = update.callback_query
     if not query:
         return
 
@@ -168,41 +168,15 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Callback error: {e}")
 
 # =========================
-# WEBHOOK (FIXED + SAFE)
-# =========================
-
-WEBHOOK_LOCK = False
-
-async def post_init(app: Application):
-    global WEBHOOK_LOCK
-
-    if WEBHOOK_LOCK:
-        return
-
-    try:
-        logger.info("Setting webhook...")
-
-        await app.bot.delete_webhook(drop_pending_updates=True)
-
-        # مهم: منع Flood
-        await app.bot.set_webhook(
-            url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
-        )
-
-        WEBHOOK_LOCK = True
-        logger.info("Webhook set successfully")
-
-    except Exception as e:
-        logger.error(f"Webhook setup error: {e}")
-
-# =========================
-# تشغيل
+# WEBHOOK V4 PRO (FIX نهائي)
 # =========================
 
 def main():
     application.add_handler(CallbackQueryHandler(buttons))
 
-    application.post_init = post_init
+    # ❌ لا post_init
+    # ❌ لا set_webhook يدوي
+    # ❌ لا delete_webhook هنا
 
     application.run_webhook(
         listen="0.0.0.0",
