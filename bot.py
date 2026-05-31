@@ -97,9 +97,83 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # HANDLERS
 # =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("أهلاً بك في خادم القرآن الرقمي 💫\nاستخدم /help لمعرفة طريقة العمل.")
+    else:
+        await update.message.reply_text("أهلاً بك! استخدم /list لعرض القائمة أو /help للمساعدة.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "💡 **طريقة عمل خادم القرآن الرقمي:**\n\n"
+        "- سجل اسمك ثم اضغط '✅ قرأت' عند انتهائك.\n"
+        "- الضغط المتكرر على 'قرأت' يبدل الحالة (تفعيل/إلغاء).\n"
+        "- المشرفات فقط يتحكمن في 'تصفير' و 'قفل/فتح' القائمة."
+    )
+    await update.message.reply_text(help_text)
+
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(build_text(chat_id), reply_markup=menu())
+
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     chat_id = update.effective_chat.id
+    user_name = update.effective_user.full_name
     data = get_data(chat_id)
-    await query.answer()
-    user_name
+    
+    # 1. منطق زر "قرأت" (Toggle)
+    if query.data == "read":
+        if user_name not in data["registered"]:
+            await query.answer("يجب تسجيل اسمك أولاً!", show_alert=True)
+            return
+        if user_name in data["readers"]:
+            data["readers"].remove(user_name)
+            await query.answer("تم إلغاء علامة القراءة.")
+        else:
+            data["readers"].add(user_name)
+            await query.answer("تم تثبيت القراءة ✅")
+
+    # 2. منطق المشرفات (Toggle)
+    elif query.data in ["reset", "toggle"]:
+        if not await is_admin(update, context):
+            await query.answer("للمشرفات فقط!", show_alert=True)
+            return
+        if query.data == "toggle":
+            data["registration_open"] = not data["registration_open"]
+            await query.answer(f"التسجيل أصبح {'مفتوحاً' if data['registration_open'] else 'مغلقاً'}")
+        elif query.data == "reset":
+            data["registered"] = []
+            data["readers"] = set()
+            data["excused"] = set()
+            await query.answer("تم تصفير القائمة.")
+
+    # 3. باقي الأزرار (تسجيل/اعتذار/مستمعة/حذف)
+    elif query.data == "register":
+        if not data["registration_open"]:
+            await query.answer("التسجيل مغلق حالياً.", show_alert=True)
+            return
+        if user_name not in data["registered"]:
+            data["registered"].append(user_name)
+            await query.answer("تم تسجيلك.")
+    elif query.data == "listener":
+        data["listeners"].add(user_name)
+        await query.answer("تم تسجيلك كمستمعة.")
+    elif query.data == "excused":
+        data["excused"].add(user_name)
+        await query.answer("تم تسجيل اعتذارك.")
+    elif query.data == "remove":
+        if user_name in data["registered"]: data["registered"].remove(user_name)
+        if user_name in data["readers"]: data["readers"].remove(user_name)
+        await query.answer("تم حذف اسمك.")
+
+    await query.edit_message_text(build_text(chat_id), reply_markup=menu())
+
+# =========================
+# MAIN
+# =========================
+# (تأكد من إعداد التطبيق والـ Handlers هنا)
+# application.add_handler(CommandHandler("start", start))
+# application.add_handler(CommandHandler("help", help_command))
+# application.add_handler(CommandHandler("list", list_command))
+# application.add_handler(CallbackQueryHandler(buttons))
