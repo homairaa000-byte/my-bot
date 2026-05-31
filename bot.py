@@ -44,8 +44,11 @@ def build_text(chat_id):
 
     def format_list(items, is_registered=False):
         if not items: return "لا يوجد"
-        return "\n".join([f"{i+1}- {name}{' ✅' if (is_registered and name in data['readers']) else ''}" 
-                          for i, name in enumerate(items) if name not in data["blocked"]])
+        # إذا كانت قائمة مسجلات، نتجاهل المحظورات، أما في قائمة المحظورات نعرض الجميع
+        if is_registered:
+            return "\n".join([f"{i+1}- {name}{' ✅' if (name in data['readers']) else ''}" 
+                              for i, name in enumerate(items) if name not in data["blocked"]])
+        return "\n".join([f"{i+1}- {name}" for i, name in enumerate(items)])
 
     return (
         "السلام عليكم ورحمة الله وبركاته 🌿\n\n"
@@ -54,6 +57,7 @@ def build_text(chat_id):
         f"✍️ المسجلات:\n{format_list(data['registered'], True)}\n\n"
         f"⛔️ المعتذرات:\n{format_list(list(data['excused']))}\n\n"
         f"🎧 المستمعات:\n{format_list(list(data['listeners']))}\n\n"
+        f"🚫 المحظورات:\n{format_list(list(data['blocked']))}\n\n"
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾"
     )
 
@@ -69,7 +73,11 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_ban = update.message.reply_to_message.from_user.full_name
         data = get_data(update.effective_chat.id)
         data["blocked"].add(user_to_ban)
+        # حذفها من القوائم الأخرى فور حظرها
         if user_to_ban in data["registered"]: data["registered"].remove(user_to_ban)
+        if user_to_ban in data["readers"]: data["readers"].remove(user_to_ban)
+        if user_to_ban in data["listeners"]: data["listeners"].remove(user_to_ban)
+        if user_to_ban in data["excused"]: data["excused"].remove(user_to_ban)
         await update.message.reply_text(f"🚫 تم حظر العضوة: {user_to_ban}")
     else:
         await update.message.reply_text("يرجى الرد على رسالة العضوة المراد حظرها.")
@@ -145,8 +153,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     Thread(target=run).start()
     application = Application.builder().token(TOKEN).build()
-    
-    # ربط الأوامر
     application.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("list", list_command))
