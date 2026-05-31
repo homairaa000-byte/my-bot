@@ -32,7 +32,6 @@ def build(chat_id):
         for n, st, b, rd in data:
             if banned and b == 1: res.append(n)
             elif not banned and st == s:
-                # تظهر العلامة فقط للمسجلات (register) اللاتي ضغطن على قرأت
                 mark = " ✅" if (rd == 1 and s == 'register') else ""
                 res.append(f"{n}{mark}")
         return "لا يوجد" if not res else "\n".join(f"{i+1}- {item}" for i, item in enumerate(res))
@@ -51,6 +50,13 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+async def start(update, context):
+    chat = update.effective_chat
+    await update.message.reply_text(build(chat.id), reply_markup=menu())
+
+async def help_cmd(update, context):
+    await update.message.reply_text("وظائف البوت:\n✍️ سجل اسمي: لتسجيل حضورك.\n✅ قرأت: لتأكيد القراءة.\n🎧 مستمعة: لتسجيل كمستمعة.\n⛔️ معتذرة: لتسجيل العذر.\n🧹 تصفير: للمشرفات فقط.")
+
 async def buttons(update, context):
     q = update.callback_query
     await q.answer()
@@ -59,25 +65,16 @@ async def buttons(update, context):
     
     with db() as conn:
         if data in ["register", "listener", "excused"]:
-            # عند التسجيل الجديد، نضبط الحالة ونصفر علامة الصح
             conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", 
                          (chat_id, user_id, q.from_user.full_name, data))
         elif data == "read":
-            # التحقق: هل العضوة مسجلة في قائمة المسجلات؟
             user = conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
             if user and user[0] == 'register':
                 conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
             else:
-                await q.answer("❌ يجب تسجيل اسمك أولاً في 'المسجلات' لتتمكني من وضع علامة الصح!", show_alert=True)
+                await q.answer("❌ يجب تسجيل اسمك أولاً في 'المسجلات'!", show_alert=True)
                 return
         elif data == "remove":
             conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
         elif data == "reset":
-            if (await context.bot.get_chat_member(chat_id, q.from_user.id)).status in ['creator', 'administrator']:
-                conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-            else: return await q.answer("❌ للمشرفات فقط!", show_alert=True)
-    
-    await q.edit_message_text(build(chat_id), reply_markup=menu())
-
-# يجب التأكد من ربط الدالة بالـ Handler في الـ main
-# app.add_handler(CallbackQueryHandler(buttons))
+            if (await context.bot.get_chat_member(chat_id,
