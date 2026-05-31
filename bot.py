@@ -43,6 +43,7 @@ def build(chat_id):
             f"وَلَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
 def menu():
+    # الترتيب: قرأت (يسار)، سجل اسمي (يمين)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
@@ -65,8 +66,12 @@ async def buttons(update, context):
     
     with db() as conn:
         if data in ["register", "listener", "excused"]:
-            conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", 
-                         (chat_id, user_id, q.from_user.full_name, data))
+            # نستخدم COALESCE للحفاظ على حالة العلامة (read_status) إذا كانت موجودة سابقاً
+            conn.execute("""
+                INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) 
+                VALUES (?, ?, ?, ?, COALESCE((SELECT read_status FROM users WHERE chat_id=? AND user_id=?), 0))
+            """, (chat_id, user_id, q.from_user.full_name, data, chat_id, user_id))
+        
         elif data == "read":
             user = conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
             if user and user[0] == 'register':
@@ -74,7 +79,28 @@ async def buttons(update, context):
             else:
                 await q.answer("❌ يجب تسجيل اسمك أولاً في 'المسجلات'!", show_alert=True)
                 return
+        
         elif data == "remove":
             conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+            
         elif data == "reset":
-            if (await context.bot.get_chat_member(chat_id,
+            if (await context.bot.get_chat_member(chat_id, q.from_user.id)).status in ['creator', 'administrator']:
+                conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+            else: return await q.answer("❌ للمشرفات فقط!", show_alert=True)
+    
+    await q.edit_message_text(build(chat_id), reply_markup=menu())
+
+def main():
+    init()
+    threading.Thread(target=lambda: app_health.run(host="0.0.0.0", port=PORT), daemon=True).start()
+    app = Application.builder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("list", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CallbackQueryHandler(buttons))
+    
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
