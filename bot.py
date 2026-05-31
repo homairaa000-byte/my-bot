@@ -2,8 +2,16 @@ import os
 import logging
 from datetime import datetime
 import pytz
+from flask import Flask
+from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# إعداد السيرفر الوهمي لـ Render
+app = Flask(__name__)
+@app.route('/')
+def index(): return "Bot is running!"
+def run(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
 logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -30,13 +38,12 @@ def menu():
 
 def build_text(chat_id):
     data = get_data(chat_id)
-    tz = pytz.timezone("Asia/Riyadh")
+    tz = pytz.timezone("Africa/Tripoli")
     date_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     status = "🔓 مفتوح" if data["registration_open"] else "🔒 مغلق"
 
     def format_list(items, is_registered=False):
         if not items: return "لا يوجد"
-        # تحويل القائمة لسترينج مع استثناء المحظورات
         return "\n".join([f"{i+1}- {name}{' ✅' if (is_registered and name in data['readers']) else ''}" 
                           for i, name in enumerate(items) if name not in data["blocked"]])
 
@@ -62,7 +69,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_ban = update.message.reply_to_message.from_user.full_name
         data = get_data(update.effective_chat.id)
         data["blocked"].add(user_to_ban)
-        # إزالة العضوة من كل القوائم
         if user_to_ban in data["registered"]: data["registered"].remove(user_to_ban)
         await update.message.reply_text(f"🚫 تم حظر العضوة: {user_to_ban}")
     else:
@@ -83,7 +89,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- 🧹 **تصفير:** لمسح جميع القوائم.\n"
         "- 🔒 **قفل/فتح:** للتحكم في قبول مسجلات جدد.\n"
         "- 🚫 **حظر عضوة:** ردي على رسالة العضوة بالأمر /ban لحظرها.\n\n"
-        "تذكير: عند الانتقال من قائمة لأخرى، سيتم تحديث حالتك تلقائياً.\n\n"
+        "تذكير: عند الانتقال من قائمة لأخرى باستخدام الأزرار، سيقوم البوت تلقائياً بتحديث حالتك وحذف اسمك من القوائم السابقة.\n\n"
         "والله ولي التوفيق."
     )
     await update.message.reply_text(help_text)
@@ -140,6 +146,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(build_text(chat_id), reply_markup=menu())
 
 if __name__ == '__main__':
+    Thread(target=run).start() # تشغيل السيرفر
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
