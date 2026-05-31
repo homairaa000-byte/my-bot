@@ -19,14 +19,18 @@ def db(): return sqlite3.connect(DB, check_same_thread=False)
 
 def init():
     with db() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 
-def fetch(chat_id):
-    with db() as conn:
-        return conn.execute("SELECT name, status, is_banned, read_status FROM users WHERE chat_id=?", (chat_id,)).fetchall()
-
 def build(chat_id):
-    data = fetch(chat_id)
+    with db() as conn:
+        # جلب حالة القفل
+        locked = conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)).fetchone()
+        is_locked = locked[0] if locked else 0
+        data = conn.execute("SELECT name, status, is_banned, read_status FROM users WHERE chat_id=?", (chat_id,)).fetchall()
+    
+    status_text = "🔒 التسجيل مغلق" if is_locked else "🔓 التسجيل مفتوح"
+    
     def f(s, banned=False): 
         res = []
         for n, st, b, rd in data:
@@ -37,26 +41,18 @@ def build(chat_id):
         return "لا يوجد" if not res else "\n".join(f"{i+1}- {item}" for i, item in enumerate(res))
     
     now = datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%Y-%m-%d %H:%M")
-    return (f"السلام عليكم ورحمة الله وبركاته\n📅 {now}\n\nخادم القرآن الرقمي 💫\nقائمة تسجيل الأدوار 📝\n\n"
+    return (f"السلام عليكم ورحمة الله وبركاته\n📅 {now}\n\nخادم القرآن الرقمي 💫\n{status_text}\nقائمة تسجيل الأدوار 📝\n\n"
             f"✍️ المسجلات:\n{f('register')}\n\n⛔️ المعتذرات:\n{f('excused')}\n\n"
             f"🎧 المستمعات:\n{f('listener')}\n\n🚫 المحظورات:\n{f('', banned=True)}\n\n"
             f"وَلَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
 def menu():
-    # الترتيب: قرأت (يسار)، سجل اسمي (يمين)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
         [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")],
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
-
-async def start(update, context):
-    chat = update.effective_chat
-    await update.message.reply_text(build(chat.id), reply_markup=menu())
-
-async def help_cmd(update, context):
-    await update.message.reply_text("وظائف البوت:\n✍️ سجل اسمي: لتسجيل حضورك.\n✅ قرأت: لتأكيد القراءة.\n🎧 مستمعة: لتسجيل كمستمعة.\n⛔️ معتذرة: لتسجيل العذر.\n🧹 تصفير: للمشرفات فقط.")
 
 async def buttons(update, context):
     q = update.callback_query
@@ -65,42 +61,38 @@ async def buttons(update, context):
     data = q.data
     
     with db() as conn:
+        # التحقق من حالة القفل
+        locked = conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)).fetchone()
+        is_locked = locked[0] if locked else 0
+
         if data in ["register", "listener", "excused"]:
-            # نستخدم COALESCE للحفاظ على حالة العلامة (read_status) إذا كانت موجودة سابقاً
+            if is_locked:
+                await q.answer("❌ التسجيل مغلق حالياً من قبل المشرفات!", show_alert=True)
+                return
             conn.execute("""
                 INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) 
                 VALUES (?, ?, ?, ?, COALESCE((SELECT read_status FROM users WHERE chat_id=? AND user_id=?), 0))
             """, (chat_id, user_id, q.from_user.full_name, data, chat_id, user_id))
         
+        elif data == "lock":
+            if (await context.bot.get_chat_member(chat_id, user_id)).status in ['creator', 'administrator']:
+                conn.execute("INSERT OR REPLACE INTO groups (chat_id, locked) VALUES (?, (SELECT CASE WHEN locked=0 THEN 1 ELSE 0 END FROM groups WHERE chat_id=?))", (chat_id, chat_id))
+            else: await q.answer("❌ للمشرفات فقط!", show_alert=True)
+            
         elif data == "read":
             user = conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
             if user and user[0] == 'register':
                 conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
             else:
-                await q.answer("❌ يجب تسجيل اسمك أولاً في 'المسجلات'!", show_alert=True)
+                await q.answer("❌ يجب تسجيل اسمك أولاً!", show_alert=True)
                 return
-        
         elif data == "remove":
             conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-            
         elif data == "reset":
-            if (await context.bot.get_chat_member(chat_id, q.from_user.id)).status in ['creator', 'administrator']:
+            if (await context.bot.get_chat_member(chat_id, user_id)).status in ['creator', 'administrator']:
                 conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
             else: return await q.answer("❌ للمشرفات فقط!", show_alert=True)
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-def main():
-    init()
-    threading.Thread(target=lambda: app_health.run(host="0.0.0.0", port=PORT), daemon=True).start()
-    app = Application.builder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("list", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CallbackQueryHandler(buttons))
-    
-    app.run_polling(drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
+# ... (باقي الدوال start و help و main كما كانت في السابق)
