@@ -4,9 +4,6 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# =========================
-# TOKEN & DATA
-# =========================
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN: raise Exception("BOT_TOKEN missing")
 
@@ -20,9 +17,6 @@ def get_data(chat_id):
         }
     return chat_data[chat_id]
 
-# =========================
-# MENU & BUILD TEXT
-# =========================
 def menu():
     keyboard = [
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
@@ -54,9 +48,6 @@ def build_text(chat_id):
         "﴿ وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ ﴾"
     )
 
-# =========================
-# UTILS & HANDLERS
-# =========================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         admins = await context.bot.get_chat_administrators(update.effective_chat.id)
@@ -88,7 +79,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if user_name in data["readers"]: data["readers"].remove(user_name)
         else: data["readers"].add(user_name)
-    
     elif query.data in ["reset", "toggle"]:
         if not await is_admin(update, context):
             await query.answer("للمشرفات فقط!", show_alert=True)
@@ -98,7 +88,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["registered"] = []
             data["readers"] = set()
             data["excused"] = set()
-    
     elif query.data == "register":
         if not data["registration_open"]:
             await query.answer("التسجيل مغلق حالياً.", show_alert=True)
@@ -109,11 +98,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "remove":
         if user_name in data["registered"]: data["registered"].remove(user_name)
         if user_name in data["readers"]: data["readers"].remove(user_name)
-
     await query.edit_message_text(build_text(chat_id), reply_markup=menu())
 
-# تأكد من تسجيل هذه في كود التشغيل الرئيسي لديك
-# application.add_handler(CommandHandler("start", start))
-# application.add_handler(CommandHandler("help", help_command))
-# application.add_handler(CommandHandler("list", list_command))
-# application.add_handler(CallbackQueryHandler(buttons))
+if __name__ == '__main__':
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("list", list_command))
+    application.add_handler(CallbackQueryHandler(buttons))
+    application.run_polling()
