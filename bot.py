@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from datetime import datetime
 
 import pytz
@@ -11,7 +12,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 # =========================
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("V4_PRO_BOT")
+logger = logging.getLogger("bot")
 
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -23,10 +24,22 @@ WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
 # =========================
+# منع تكرار webhook (مهم جداً)
+# =========================
+
+WEBHOOK_SET = False
+WEBHOOK_LAST_CHECK = 0
+
+# =========================
 # Telegram App
 # =========================
 
-application = Application.builder().token(TOKEN).build()
+application = (
+    Application.builder()
+    .token(TOKEN)
+    .concurrent_updates(True)
+    .build()
+)
 
 # =========================
 # بيانات (RAM)
@@ -47,7 +60,7 @@ def get_data(chat_id):
     return chat_data[chat_id]
 
 # =========================
-# UI (نفس التصميم الأصلي)
+# UI
 # =========================
 
 def menu():
@@ -91,11 +104,10 @@ def build_text(chat_id):
     )
 
 # =========================
-# Callback Handler (محمي)
+# Callback Handler
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
     if not query:
         return
@@ -119,7 +131,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["readers"].discard(user_id)
 
     try:
-
         if query.data == "register":
             if not data["registration_open"]:
                 await query.answer("التسجيل مغلق", show_alert=True)
@@ -168,15 +179,49 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Callback error: {e}")
 
 # =========================
-# WEBHOOK V4 PRO (FIX نهائي)
+# WEBHOOK (PRODUCTION SAFE)
+# =========================
+
+async def post_init(app: Application):
+    global WEBHOOK_SET, WEBHOOK_LAST_CHECK
+
+    now = time.time()
+
+    # منع إعادة التعيين المتكرر
+    if WEBHOOK_SET and (now - WEBHOOK_LAST_CHECK < 120):
+        logger.info("Webhook already set, skipping")
+        return
+
+    try:
+        logger.info("Checking webhook...")
+
+        info = await app.bot.get_webhook_info()
+        target = f"{WEBHOOK_URL}/webhook/{TOKEN}"
+
+        if info.url != target:
+            logger.info("Setting webhook...")
+
+            await app.bot.set_webhook(
+                url=target,
+                drop_pending_updates=True
+            )
+
+        WEBHOOK_SET = True
+        WEBHOOK_LAST_CHECK = time.time()
+
+        logger.info("Webhook ready")
+
+    except Exception as e:
+        logger.error(f"Webhook setup failed: {e}")
+
+# =========================
+# تشغيل
 # =========================
 
 def main():
     application.add_handler(CallbackQueryHandler(buttons))
 
-    # ❌ لا post_init
-    # ❌ لا set_webhook يدوي
-    # ❌ لا delete_webhook هنا
+    application.post_init = post_init
 
     application.run_webhook(
         listen="0.0.0.0",
