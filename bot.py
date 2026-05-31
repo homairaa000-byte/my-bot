@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from datetime import datetime
 
 import pytz
@@ -20,6 +21,9 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 if not TOKEN or not WEBHOOK_URL:
     raise Exception("Missing BOT_TOKEN or WEBHOOK_URL")
 
+# تنظيف الرابط
+WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
+
 # =========================
 # Flask
 # =========================
@@ -27,13 +31,13 @@ if not TOKEN or not WEBHOOK_URL:
 app = Flask(__name__)
 
 # =========================
-# Telegram App
+# Telegram Application
 # =========================
 
 application = Application.builder().token(TOKEN).build()
 
 # =========================
-# البيانات
+# بيانات
 # =========================
 
 chat_data = {}
@@ -70,90 +74,39 @@ def menu():
             InlineKeyboardButton("🧹 تصفير", callback_data="reset"),
             InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
         ],
-        [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("❌ حذف", callback_data="remove")]
     ])
 
 
 # =========================
-# تنسيق عرض
+# تنسيق
 # =========================
 
-def fmt_dict(d):
-    if not d:
-        return "لا يوجد"
-    return "\n".join(f"{i+1}- {name}" for i, name in enumerate(d.values()))
+def fmt(d):
+    return "لا يوجد" if not d else "\n".join(f"{i+1}- {name}" for i, name in enumerate(d.values()))
 
 
-def fmt_readers(data):
-    if not data["readers"]:
-        return "لا يوجد"
-
-    names = []
-    for uid in data["readers"]:
-        names.append(data["registered"].get(uid, f"User {uid}"))
-
-    return "\n".join(f"{i+1}- {n}" for i, n in enumerate(names))
+def fmt_set(s):
+    return "لا يوجد" if not s else "\n".join(f"{i+1}- {uid}" for i, uid in enumerate(s))
 
 
 def build_text(chat_id):
     data = get_data(chat_id)
 
-    tz = pytz.timezone("Africa/Tripoli")
-    now = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(pytz.timezone("Africa/Tripoli")).strftime("%Y-%m-%d %H:%M")
 
     return (
         f"📅 {now}\n\n"
         "خادم القرآن الرقمي 💫\n\n"
-        f"✍️ المسجلات:\n{fmt_dict(data['registered'])}\n\n"
-        f"⛔️ المعتذرات:\n{fmt_dict(data['excused'])}\n\n"
-        f"🎧 المستمعات:\n{fmt_dict(data['listeners'])}\n\n"
-        f"✅ قرأت:\n{fmt_readers(data)}"
+        f"✍️ المسجلات:\n{fmt(data['registered'])}\n\n"
+        f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n"
+        f"🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
+        f"✅ قرأت:\n{fmt_set(data['readers'])}"
     )
 
 
 # =========================
-# webhook setup (FIXED)
-# =========================
-
-async def setup_webhook():
-    await application.initialize()
-
-    # حذف أي webhook قديم
-    await application.bot.delete_webhook(drop_pending_updates=True)
-
-    # ضبط webhook جديد
-    await application.bot.set_webhook(
-        url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
-    )
-
-    await application.start()
-
-
-# =========================
-# Flask webhook (FIXED CORE)
-# =========================
-
-@app.post(f"/webhook/{TOKEN}")
-def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-
-        # ⚠️ بدون asyncio.run (هذا هو سبب أعطال عندك سابقًا)
-        application.update_queue.put_nowait(update)
-
-    except Exception as e:
-        logging.error(f"Webhook error: {e}")
-
-    return "OK"
-
-
-@app.route("/")
-def home():
-    return "Bot is running!"
-
-
-# =========================
-# Callback system
+# Callback handler
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,51 +121,45 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = get_data(chat_id)
 
     if user_id in data["blocked"]:
-        await query.answer("أنت محظور", show_alert=True)
+        await query.answer("أنت محظورة", show_alert=True)
         return
 
-    def clear_user():
+    def clear():
         data["registered"].pop(user_id, None)
         data["listeners"].pop(user_id, None)
         data["excused"].pop(user_id, None)
         data["readers"].discard(user_id)
 
-    # ================= REGISTER =================
     if query.data == "register":
         if not data["registration_open"]:
             await query.answer("التسجيل مغلق", show_alert=True)
             return
-        clear_user()
+        clear()
         data["registered"][user_id] = name
 
-    # ================= READ TOGGLE (FIXED) =================
     elif query.data == "read":
         if user_id not in data["registered"]:
-            await query.answer("سجل اسمك أولاً", show_alert=True)
+            await query.answer("سجلي اسمك أولاً", show_alert=True)
             return
 
         if user_id in data["readers"]:
             data["readers"].remove(user_id)
-            await query.answer("❌ تم إلغاء قرأت")
+            await query.answer("تم إلغاء قرأت")
         else:
             data["readers"].add(user_id)
-            await query.answer("✅ تم تسجيل قرأت")
+            await query.answer("تم تسجيل قرأت")
 
-    # ================= LISTENER =================
     elif query.data == "listener":
-        clear_user()
+        clear()
         data["listeners"][user_id] = name
 
-    # ================= EXCUSED =================
     elif query.data == "excused":
-        clear_user()
+        clear()
         data["excused"][user_id] = name
 
-    # ================= REMOVE =================
     elif query.data == "remove":
-        clear_user()
+        clear()
 
-    # ================= ADMIN =================
     elif query.data == "reset":
         data["registered"].clear()
         data["listeners"].clear()
@@ -229,16 +176,49 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# تشغيل آمن 100%
+# webhook setup (FIXED)
+# =========================
+
+async def setup_webhook():
+    await application.initialize()
+
+    await application.bot.delete_webhook(drop_pending_updates=True)
+
+    await application.bot.set_webhook(
+        url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
+    )
+
+    # مهم جدًا
+    await application.start()
+    await application.updater.start_polling(drop_pending_updates=True)
+
+
+# =========================
+# Flask webhook (FIXED بدون asyncio.run)
+# =========================
+
+@app.post(f"/webhook/{TOKEN}")
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+
+    # بدل asyncio.run ❌
+    application.create_task(application.process_update(update))
+
+    return "OK"
+
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+
+# =========================
+# تشغيل
 # =========================
 
 if __name__ == "__main__":
-
     application.add_handler(CallbackQueryHandler(buttons))
 
-    # webhook setup
-    import asyncio
     asyncio.run(setup_webhook())
 
-    # Flask
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
