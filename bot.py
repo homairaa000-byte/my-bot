@@ -8,14 +8,14 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# إعداد المتغيرات
+# إعداد المتغيرات مع قيمة افتراضية للتوكن لتفادي الانهيار الفوري
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
 
-# إعداد Flask لتبقى الخدمة نشطة على Render
+# إعداد Flask 
 app_health = Flask(__name__)
 @app_health.route('/')
 def health(): return "Bot is live", 200
@@ -91,15 +91,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
 def main():
-    # تشغيل Flask في خيط منفصل (Thread)
+    if not TOKEN:
+        print("خطأ: BOT_TOKEN غير موجود في المتغيرات!")
+        return
+
+    # إعداد البوت
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(buttons))
+
+    # تشغيل Flask في Thread منفصل
     def run_flask():
         app_health.run(host="0.0.0.0", port=PORT)
     threading.Thread(target=run_flask, daemon=True).start()
 
     # تشغيل البوت
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(buttons))
+    print("البوت بدأ العمل...")
     application.run_polling()
 
 if __name__ == '__main__':
