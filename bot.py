@@ -6,8 +6,9 @@ from flask import Flask, request
 from datetime import datetime
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+# إعدادات التسجيل لمعرفة ما يحدث في الـ Logs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -15,6 +16,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
+# إعداد التطبيق
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 chat_data = {}
 
@@ -40,9 +42,15 @@ def build_text(chat_id):
             f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
             f"✅ قرأت:\n{fmt_set(data['readers'])}")
 
+# دالة للأمر /start لإرسال القائمة
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
+
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query: return
+    await query.answer()
+    
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     name = update.effective_user.full_name
@@ -61,10 +69,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "remove": clear()
     elif query.data == "reset": data["registered"].clear(); data["listeners"].clear(); data["excused"].clear(); data["readers"].clear()
     
-    await query.answer("تمت العملية!")
-    # الحل: إرسال رسالة جديدة دائماً لضمان الظهور
-    await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
 
+# إعداد Flask
 app = Flask(__name__)
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
@@ -73,6 +83,7 @@ def webhook():
     return "OK", 200
 
 async def start_bot():
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(buttons))
     await application.initialize()
     await application.start()
@@ -81,6 +92,4 @@ async def start_bot():
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    application.bot_data['loop'] = loop
-    threading.Thread(target=lambda: loop.run_until_complete(start_bot()), daemon=True).start()
-    app.run(host="0.0.0.0", port=PORT)
+    application.bot_
