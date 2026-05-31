@@ -1,13 +1,14 @@
 import os
 import logging
-import asyncio
 from datetime import datetime
 
 import pytz
-from flask import Flask, request
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
 # =========================
 # إعدادات
@@ -21,27 +22,21 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 if not TOKEN or not WEBHOOK_URL:
     raise Exception("Missing BOT_TOKEN or WEBHOOK_URL")
 
-# تنظيف الرابط
 WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
 
-# =========================
-# Flask
-# =========================
-
-app = Flask(__name__)
+PORT = int(os.environ.get("PORT", 10000))
 
 # =========================
-# Telegram Application
+# Telegram App
 # =========================
 
 application = Application.builder().token(TOKEN).build()
 
 # =========================
-# بيانات
+# بيانات (RAM)
 # =========================
 
 chat_data = {}
-
 
 def get_data(chat_id):
     if chat_id not in chat_data:
@@ -54,7 +49,6 @@ def get_data(chat_id):
             "registration_open": True,
         }
     return chat_data[chat_id]
-
 
 # =========================
 # UI
@@ -77,22 +71,18 @@ def menu():
         [InlineKeyboardButton("❌ حذف", callback_data="remove")]
     ])
 
-
 # =========================
 # تنسيق
 # =========================
 
 def fmt(d):
-    return "لا يوجد" if not d else "\n".join(f"{i+1}- {name}" for i, name in enumerate(d.values()))
-
+    return "لا يوجد" if not d else "\n".join(f"{i+1}- {n}" for i, n in enumerate(d.values()))
 
 def fmt_set(s):
     return "لا يوجد" if not s else "\n".join(f"{i+1}- {uid}" for i, uid in enumerate(s))
 
-
 def build_text(chat_id):
     data = get_data(chat_id)
-
     now = datetime.now(pytz.timezone("Africa/Tripoli")).strftime("%Y-%m-%d %H:%M")
 
     return (
@@ -104,9 +94,8 @@ def build_text(chat_id):
         f"✅ قرأت:\n{fmt_set(data['readers'])}"
     )
 
-
 # =========================
-# Callback handler
+# Callback Handler
 # =========================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,7 +128,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "read":
         if user_id not in data["registered"]:
-            await query.answer("سجلي اسمك أولاً", show_alert=True)
+            await query.answer("سجل اسمك أولاً", show_alert=True)
             return
 
         if user_id in data["readers"]:
@@ -174,51 +163,33 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=menu()
     )
 
-
 # =========================
-# webhook setup (FIXED)
+# WEBHOOK (الطريقة الصحيحة 100%)
 # =========================
 
-async def setup_webhook():
-    await application.initialize()
+async def post_init(app: Application):
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
-    await application.bot.delete_webhook(drop_pending_updates=True)
-
-    await application.bot.set_webhook(
+    await app.bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
     )
 
-    # مهم جدًا
-    await application.start()
-    await application.updater.start_polling(drop_pending_updates=True)
-
-
 # =========================
-# Flask webhook (FIXED بدون asyncio.run)
+# تشغيل webhook مباشرة (بدون Flask)
 # =========================
 
-@app.post(f"/webhook/{TOKEN}")
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-
-    # بدل asyncio.run ❌
-    application.create_task(application.process_update(update))
-
-    return "OK"
-
-
-@app.route("/")
-def home():
-    return "Bot is running!"
-
-
-# =========================
-# تشغيل
-# =========================
-
-if __name__ == "__main__":
+def main():
     application.add_handler(CallbackQueryHandler(buttons))
 
-    asyncio.run(setup_webhook())
+    application.post_init = post_init
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=f"webhook/{TOKEN}",
+        webhook_url=f"{WEBHOOK_URL}/webhook/{TOKEN}",
+        drop_pending_updates=True,
+    )
+
+if __name__ == "__main__":
+    main()
