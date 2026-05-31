@@ -10,7 +10,6 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    BotCommand,
 )
 
 from telegram.ext import (
@@ -46,13 +45,14 @@ if not WEBHOOK_URL:
 app = Flask(__name__)
 
 # =========================
-# Application (IMPORTANT FIX)
+# Application
 # =========================
 
 application = Application.builder().token(TOKEN).build()
 
+
 # =========================
-# بيانات
+# بيانات (ID + Name)
 # =========================
 
 chat_data = {}
@@ -61,11 +61,11 @@ chat_data = {}
 def get_data(chat_id):
     if chat_id not in chat_data:
         chat_data[chat_id] = {
-            "registered": [],
-            "readers": set(),
-            "listeners": set(),
-            "excused": set(),
-            "blocked": set(),
+            "registered": {},   # id -> name
+            "readers": {},      # id -> name
+            "listeners": {},    # id -> name
+            "excused": {},      # id -> name
+            "blocked": set(),   # ids
             "blocked_names": {},
             "registration_open": True,
         }
@@ -79,26 +79,35 @@ def get_data(chat_id):
 def menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ قرأت", "read"),
-            InlineKeyboardButton("✍️ سجل اسمي", "register"),
+            InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            InlineKeyboardButton("✍️ سجل اسمي", callback_data="register"),
         ],
         [
-            InlineKeyboardButton("🎧 مستمعة", "listener"),
-            InlineKeyboardButton("⛔️ معتذرة", "excused"),
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+            InlineKeyboardButton("⛔️ معتذرة", callback_data="excused"),
         ],
         [
-            InlineKeyboardButton("🧹 تصفير", "reset"),
-            InlineKeyboardButton("🔒 قفل/فتح", "toggle"),
+            InlineKeyboardButton("🧹 تصفير", callback_data="reset"),
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="toggle"),
         ],
         [
-            InlineKeyboardButton("❌ حذف اسمي", "remove")
+            InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
         ]
     ])
 
 
 # =========================
-# النص
+# عرض القوائم (بالأسماء)
 # =========================
+
+def format_dict(d):
+    if not d:
+        return "لا يوجد"
+    return "\n".join(
+        f"{i+1}- {name}"
+        for i, name in enumerate(d.values())
+    )
+
 
 def build_text(chat_id):
     data = get_data(chat_id)
@@ -111,21 +120,20 @@ def build_text(chat_id):
     return (
         f"📅 {date_str}\n\n"
         "خادم القرآن الرقمي 💫\n\n"
-        f"المسجلات: {len(data['registered'])}\n"
-        f"المعتذرات: {len(data['excused'])}\n"
-        f"المستمعات: {len(data['listeners'])}\n"
-        f"المحظورات: {len(blocked_names)}"
+        f"✍️ المسجلات:\n{format_dict(data['registered'])}\n\n"
+        f"⛔️ المعتذرات:\n{format_dict(data['excused'])}\n\n"
+        f"🎧 المستمعات:\n{format_dict(data['listeners'])}\n\n"
+        f"🚫 المحظورات:\n{blocked_names if blocked_names else 'لا يوجد'}"
     )
 
 
 # =========================
-# حذف webhook القديم (مهم جدًا)
+# Webhook setup
 # =========================
 
 async def setup_webhook():
     await application.initialize()
 
-    # 🔥 يمنع Conflict 100%
     await application.bot.delete_webhook(drop_pending_updates=True)
 
     await application.bot.set_webhook(
@@ -158,16 +166,48 @@ def home():
 
 
 # =========================
-# تشغيل السيرفر
+# الأزرار
 # =========================
 
-if __name__ == "__main__":
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    # تشغيل webhook أولاً
-    asyncio.run(setup_webhook())
+    query = update.callback_query
+    await query.answer()
 
-    # تشغيل flask
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-    )
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    user_name = update.effective_user.full_name
+
+    data = get_data(chat_id)
+
+    # 🚫 حظر
+    if user_id in data["blocked"]:
+        await query.answer("أنتِ محظورة!", show_alert=True)
+        return
+
+    def remove_everywhere():
+        data["registered"].pop(user_id, None)
+        data["readers"].pop(user_id, None)
+        data["listeners"].pop(user_id, None)
+        data["excused"].pop(user_id, None)
+
+    # ================= REGISTER =================
+    if query.data == "register":
+
+        if not data["registration_open"]:
+            await query.answer("التسجيل مغلق", show_alert=True)
+            return
+
+        remove_everywhere()
+        data["registered"][user_id] = user_name
+
+    # ================= READ TOGGLE =================
+    elif query.data == "read":
+
+        if user_id not in data["registered"]:
+            await query.answer("يجب التسجيل أولاً", show_alert=True)
+            return
+
+        if user_id in data["readers"]:
+            del data["readers"][user_id]
+            await query.answer("تم إزالة قر
