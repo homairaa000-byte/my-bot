@@ -15,7 +15,6 @@ DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
 
-# إعداد Flask 
 app_health = Flask(__name__)
 @app_health.route('/')
 def health(): return "Bot is live", 200
@@ -67,7 +66,6 @@ async def buttons(update, context):
         locked = conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)).fetchone()
         is_locked = locked[0] if locked else 0
         
-        # التأكد من عدم المحظورين
         is_banned = conn.execute("SELECT is_banned FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
         if is_banned and is_banned[0] == 1:
             await q.answer("❌ أنت محظورة ولا يمكنك التفاعل!", show_alert=True); return
@@ -92,18 +90,12 @@ async def buttons(update, context):
             else: await q.answer("❌ للمشرفات فقط!", show_alert=True); return
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     init()
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
 async def help_command(update, context):
-    help_text = (
-        "✨ **تعليمات خادم القرآن الرقمي**\n\n"
-        "استخدم الأزرار في رسالة البوت لإدارة تسجيلك.\n"
-        "🚫 **بخصوص الحظر:**\n"
-        "إذا تم حظرك، لن تتمكني من التفاعل. للمشرفات: استخدمي `/ban` بالرد على رسالة العضوة لحظرها، و `/unban` لفك الحظر."
-    )
-    await update.message.reply_text(help_text)
+    await update.message.reply_text("✨ **تعليمات خادم القرآن**\nاستخدم الأزرار للتسجيل.\n🚫 للحظر: ردي على رسالة العضوة بـ /ban أو /unban")
 
 async def ban_user(update, context):
     if (await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)).status in ['creator', 'administrator']:
@@ -130,6 +122,8 @@ def main():
     
     def run_flask(): app_health.run(host="0.0.0.0", port=PORT)
     threading.Thread(target=run_flask, daemon=True).start()
-    application.run_polling()
+    
+    # إضافة drop_pending_updates=True هنا لمنع تداخل الطلبات
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__': main()
