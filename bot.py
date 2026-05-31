@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 import asyncio
 import threading
 from flask import Flask, request
@@ -24,7 +25,7 @@ WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
 # =========================
-# Telegram App (بدون run_webhook لنتجنب الحظر)
+# Telegram App (كما هي)
 # =========================
 application = (
     Application.builder()
@@ -34,25 +35,18 @@ application = (
 )
 
 # =========================
-# بيانات (RAM) - كما هي
+# بيانات (RAM) + الدوال (كما هي تماماً)
 # =========================
 chat_data = {}
 
 def get_data(chat_id):
     if chat_id not in chat_data:
         chat_data[chat_id] = {
-            "registered": {},
-            "readers": set(),
-            "listeners": {},
-            "excused": {},
-            "blocked": set(),
-            "registration_open": True,
+            "registered": {}, "readers": set(), "listeners": {},
+            "excused": {}, "blocked": set(), "registration_open": True,
         }
     return chat_data[chat_id]
 
-# =========================
-# UI & التنسيق - كما هي
-# =========================
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ سجل اسمي", callback_data="register"), InlineKeyboardButton("✅ قرأت", callback_data="read")],
@@ -71,9 +65,6 @@ def build_text(chat_id):
             f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
             f"✅ قرأت:\n{fmt_set(data['readers'])}")
 
-# =========================
-# Callback Handler - كما هو
-# =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query: return
@@ -106,7 +97,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: logger.error(f"Callback error: {e}")
 
 # =========================
-# الربط مع FLASK (حل مشكلة التوقف)
+# هيكل Flask (الإضافة الجديدة)
 # =========================
 app = Flask(__name__)
 
@@ -117,9 +108,9 @@ def webhook():
     return "OK", 200
 
 @app.route("/")
-def index(): return "Bot is Active", 200
+def index(): return "Bot is running", 200
 
-async def startup():
+async def start_bot():
     application.add_handler(CallbackQueryHandler(buttons))
     await application.initialize()
     await application.start()
@@ -129,5 +120,5 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     application.bot_data['loop'] = loop
-    threading.Thread(target=lambda: loop.run_until_complete(startup()), daemon=True).start()
+    threading.Thread(target=lambda: loop.run_until_complete(start_bot()), daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)
