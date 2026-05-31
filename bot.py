@@ -1,8 +1,12 @@
 import os
+import logging
 from datetime import datetime
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# إعداد السجلات (Logs) لمتابعة العمل على Render
+logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN: raise Exception("BOT_TOKEN missing")
@@ -54,6 +58,7 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return any(admin.user.id == update.effective_user.id for admin in admins)
     except: return False
 
+# تم تعديل دالة start لتكون عامة ولا تطلب صلاحيات مشرف
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == 'private':
         await update.message.reply_text("أهلاً بك في خادم القرآن الرقمي 💫\nاستخدم /help لمعرفة طريقة العمل.")
@@ -61,7 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("أهلاً بك! استخدم /list لعرض القائمة أو /help للمساعدة.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💡 **طريقة عمل خادم القرآن الرقمي:**\n\n- سجل اسمك ثم اضغط '✅ قرأت' عند انتهائك.\n- الضغط المتكرر على 'قرأت' يبدل الحالة (تفعيل/إلغاء).\n- المشرفات فقط يتحكمن في 'تصفير' و 'قفل/فتح' القائمة.")
+    await update.message.reply_text("💡 **طريقة عمل خادم القرآن الرقمي:**\n\n- سجل اسمك ثم اضغط '✅ قرأت' عند انتهائك.\n- الضغط المتكرر على 'قرأت' يبدل الحالة.\n- المشرفات فقط يتحكمن في 'تصفير' و 'قفل/فتح'.")
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_text(update.effective_chat.id), reply_markup=menu())
@@ -88,6 +93,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["registered"] = []
             data["readers"] = set()
             data["excused"] = set()
+            data["listeners"] = set()
     elif query.data == "register":
         if not data["registration_open"]:
             await query.answer("التسجيل مغلق حالياً.", show_alert=True)
