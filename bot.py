@@ -8,6 +8,7 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+# إعدادات التسجيل لمتابعة الأخطاء
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
@@ -15,13 +16,13 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 
-# إعداد التطبيق
+# بناء التطبيق
 application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 chat_data = {}
 
 def get_data(chat_id):
     if chat_id not in chat_data:
-        chat_data[chat_id] = {"registered": {}, "readers": set(), "listeners": {}, "excused": {}, "registration_open": True}
+        chat_data[chat_id] = {"registered": {}, "readers": set(), "listeners": {}, "excused": {}}
     return chat_data[chat_id]
 
 def menu():
@@ -41,6 +42,7 @@ def build_text(chat_id):
             f"⛔️ المعتذرات:\n{fmt(data['excused'])}\n\n🎧 المستمعات:\n{fmt(data['listeners'])}\n\n"
             f"✅ قرأت:\n{fmt_set(data['readers'])}")
 
+# الأوامر والأزرار
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text=build_text(update.effective_chat.id), reply_markup=menu())
 
@@ -59,13 +61,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "listener": data["listeners"][user_id] = name
     elif query.data == "excused": data["excused"][user_id] = name
     elif query.data == "remove": 
-        data["registered"].pop(user_id, None); data["listeners"].pop(user_id, None); data["excused"].pop(user_id, None); data["readers"].discard(user_id)
-    elif query.data == "reset": data["registered"].clear(); data["listeners"].clear(); data["excused"].clear(); data["readers"].clear()
+        data["registered"].pop(user_id, None); data["listeners"].pop(user_id, None); 
+        data["excused"].pop(user_id, None); data["readers"].discard(user_id)
+    elif query.data == "reset": 
+        data["registered"].clear(); data["listeners"].clear(); 
+        data["excused"].clear(); data["readers"].clear()
+    
+    try:
+        # حذف الرسالة القديمة لتجنب التكرار
+        await context.bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
+    except: pass
     
     await context.bot.send_message(chat_id=chat_id, text=build_text(chat_id), reply_markup=menu())
 
+# تشغيل الويب هوك
 app = Flask(__name__)
-
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(data=request.get_json(force=True), bot=application.bot)
@@ -73,6 +83,8 @@ def webhook():
     return "OK", 200
 
 async def start_bot():
+    # تنظيف الويب هوك القديم والبدء من جديد
+    await application.bot.delete_webhook()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(buttons))
     await application.initialize()
