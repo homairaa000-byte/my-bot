@@ -13,110 +13,99 @@ from telegram.ext import (
 )
 
 # =========================
-# إعدادات أساسية
+# إعدادات
 # =========================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # مثال: https://your-app.onrender.com
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.onrender.com
 PORT = int(os.getenv("PORT", 10000))
 
 if not TOKEN or not WEBHOOK_URL:
     raise Exception("Missing BOT_TOKEN or WEBHOOK_URL")
 
-DB_PATH = "bot.db"
+DB = "bot.db"
 
 # =========================
-# قاعدة البيانات (SQLite)
+# قاعدة بيانات خفيفة جدًا
 # =========================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+def db():
+    return sqlite3.connect(DB)
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        chat_id INTEGER,
-        user_id INTEGER,
-        name TEXT,
-        status TEXT,
-        PRIMARY KEY(chat_id, user_id)
-    )
-    """)
+def init():
+    with db() as conn:
+        c = conn.cursor()
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            chat_id INTEGER,
+            user_id INTEGER,
+            name TEXT,
+            status TEXT,
+            PRIMARY KEY(chat_id, user_id)
+        )
+        """)
 
-    conn.commit()
-    conn.close()
+def set_user(chat_id, user_id, name, status):
+    with db() as conn:
+        c = conn.cursor()
+        c.execute("""
+        INSERT INTO users VALUES (?, ?, ?, ?)
+        ON CONFLICT(chat_id, user_id)
+        DO UPDATE SET name=excluded.name, status=excluded.status
+        """, (chat_id, user_id, name, status))
 
-def set_status(chat_id, user_id, name, status):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+def delete_user(chat_id, user_id):
+    with db() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
 
-    c.execute("""
-    INSERT INTO users (chat_id, user_id, name, status)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(chat_id, user_id)
-    DO UPDATE SET name=excluded.name, status=excluded.status
-    """, (chat_id, user_id, name, status))
+def reset_chat(chat_id):
+    with db() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
-    conn.commit()
-    conn.close()
-
-def remove_user(chat_id, user_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    conn.commit()
-    conn.close()
-
-def clear_chat(chat_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-    conn.commit()
-    conn.close()
-
-def get_all(chat_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT name, status FROM users WHERE chat_id=?", (chat_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+def fetch(chat_id):
+    with db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT name, status FROM users WHERE chat_id=?", (chat_id,))
+        return c.fetchall()
 
 # =========================
 # واجهة العرض
 # =========================
-def build_text(chat_id):
-    data = get_all(chat_id)
+def build(chat_id):
+    data = fetch(chat_id)
 
-    register = [n for n, s in data if s == "register"]
-    listener = [n for n, s in data if s == "listener"]
-    excused = [n for n, s in data if s == "excused"]
-    read = [n for n, s in data if s == "read"]
-
-    now = datetime.now(pytz.timezone("Africa/Tripoli")).strftime("%Y-%m-%d %H:%M")
+    def group(status):
+        return [n for n, s in data if s == status]
 
     def fmt(lst):
         return "لا يوجد" if not lst else "\n".join(f"{i+1}- {n}" for i, n in enumerate(lst))
+
+    now = datetime.now(pytz.timezone("Africa/Tripoli")).strftime("%Y-%m-%d %H:%M")
 
     return f"""
 📅 {now}
 
 📖 خادم القرآن الرقمي
 
-✍️ المسجلات:
-{fmt(register)}
+✍️ مسجلات:
+{fmt(group("register"))}
 
-🎧 المستمعات:
-{fmt(listener)}
+🎧 مستمعات:
+{fmt(group("listener"))}
 
-⛔️ المعتذرات:
-{fmt(excused)}
+⛔️ معتذرات:
+{fmt(group("excused"))}
 
 ✅ قرأت:
-{fmt(read)}
+{fmt(group("read"))}
 """.strip()
 
+# =========================
+# الأزرار
+# =========================
 def menu():
     return InlineKeyboardMarkup([
         [
@@ -138,44 +127,48 @@ def menu():
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    await update.message.reply_text(build_text(chat_id), reply_markup=menu())
+    await update.message.reply_text(build(chat_id), reply_markup=menu())
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    chat_id = query.message.chat_id
-    user_id = query.from_user.id
-    name = query.from_user.full_name
-
-    data = query.data
-
-    if data in ["register", "listener", "excused", "read"]:
-        set_status(chat_id, user_id, name, data)
-
-    elif data == "remove":
-        remove_user(chat_id, user_id)
-
-    elif data == "reset":
-        clear_chat(chat_id)
-
-    await query.edit_message_text(
-        text=build_text(chat_id),
-        reply_markup=menu()
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📌 الأوامر:\n"
+        "/start - تشغيل\n"
+        "/help - مساعدة\n\n"
+        "استخدم الأزرار للتسجيل أو التعديل"
     )
 
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    chat_id = q.message.chat_id
+    user_id = q.from_user.id
+    name = q.from_user.full_name
+    data = q.data
+
+    if data in ["register", "listener", "excused", "read"]:
+        set_user(chat_id, user_id, name, data)
+
+    elif data == "remove":
+        delete_user(chat_id, user_id)
+
+    elif data == "reset":
+        reset_chat(chat_id)
+
+    await q.edit_message_text(build(chat_id), reply_markup=menu())
+
 # =========================
-# تشغيل البوت (احترافي)
+# تشغيل احترافي Webhook
 # =========================
 def main():
-    init_db()
+    init()
 
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
 
-    # Webhook احترافي بدون Flask
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
