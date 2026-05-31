@@ -8,7 +8,7 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# إعداد المتغيرات مع قيمة افتراضية للتوكن لتفادي الانهيار الفوري
+# إعداد المتغيرات
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
 DB = "bot.db"
@@ -66,6 +66,12 @@ async def buttons(update, context):
     with db() as conn:
         locked = conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)).fetchone()
         is_locked = locked[0] if locked else 0
+        
+        # التأكد من عدم المحظورين
+        is_banned = conn.execute("SELECT is_banned FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
+        if is_banned and is_banned[0] == 1:
+            await q.answer("❌ أنت محظورة ولا يمكنك التفاعل!", show_alert=True); return
+
         if data in ["register", "listener", "excused"]:
             if is_locked:
                 await q.answer("❌ التسجيل مغلق!", show_alert=True); return
@@ -90,24 +96,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init()
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
-def main():
-    if not TOKEN:
-        print("خطأ: BOT_TOKEN غير موجود في المتغيرات!")
-        return
+async def help_command(update, context):
+    help_text = (
+        "✨ **تعليمات خادم القرآن الرقمي**\n\n"
+        "استخدم الأزرار في رسالة البوت لإدارة تسجيلك.\n"
+        "🚫 **بخصوص الحظر:**\n"
+        "إذا تم حظرك، لن تتمكني من التفاعل. للمشرفات: استخدمي `/ban` بالرد على رسالة العضوة لحظرها، و `/unban` لفك الحظر."
+    )
+    await update.message.reply_text(help_text)
 
-    # إعداد البوت
+async def ban_user(update, context):
+    if (await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)).status in ['creator', 'administrator']:
+        if update.message.reply_to_message:
+            u_id = update.message.reply_to_message.from_user.id
+            with db() as conn: conn.execute("UPDATE users SET is_banned = 1 WHERE user_id = ?", (u_id,))
+            await update.message.reply_text("⛔️ تم حظر العضوة.")
+    
+async def unban_user(update, context):
+    if (await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)).status in ['creator', 'administrator']:
+        if update.message.reply_to_message:
+            u_id = update.message.reply_to_message.from_user.id
+            with db() as conn: conn.execute("UPDATE users SET is_banned = 0 WHERE user_id = ?", (u_id,))
+            await update.message.reply_text("✅ تم فك الحظر.")
+
+def main():
+    if not TOKEN: return
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("ban", ban_user))
+    application.add_handler(CommandHandler("unban", unban_user))
     application.add_handler(CallbackQueryHandler(buttons))
-
-    # تشغيل Flask في Thread منفصل
-    def run_flask():
-        app_health.run(host="0.0.0.0", port=PORT)
+    
+    def run_flask(): app_health.run(host="0.0.0.0", port=PORT)
     threading.Thread(target=run_flask, daemon=True).start()
-
-    # تشغيل البوت
-    print("البوت بدأ العمل...")
     application.run_polling()
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()
