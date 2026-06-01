@@ -1,5 +1,6 @@
-aiosqlite
-python-telegram-bot
+python-telegram-bot>=21.10
 flask
+aiosqlite
 gunicorn
+
 
