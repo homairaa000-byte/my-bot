@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -9,13 +10,14 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-# الرابط الخاص بك على Render
-WEBHOOK_URL = f"https://your-app-name.onrender.com/{TOKEN}" 
+# الرابط المحدث بناءً على طلبك
+WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
 DB = "/tmp/bot.db" 
 
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
+bot_app = Application.builder().token(TOKEN).build()
 
 # --- قاعدة البيانات ---
 def db(): return sqlite3.connect(DB, check_same_thread=False)
@@ -79,15 +81,15 @@ async def buttons(update, context):
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-# --- إعداد Flask للـ Webhook ---
-bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+# --- المسارات ---
+@app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run(bot_app.process_update(update))
+    # استخدام خيط (thread) لمنع تعليق الـ Event Loop
+    threading.Thread(target=lambda: asyncio.run(bot_app.process_update(update))).start()
     return "ok", 200
 
 @app.route('/')
@@ -95,9 +97,9 @@ def index(): return "Bot is running", 200
 
 async def setup_webhook():
     await bot_app.bot.set_webhook(WEBHOOK_URL)
+    logging.info(f"Webhook set to: {WEBHOOK_URL}")
 
 if __name__ == '__main__':
-    # تهيئة الـ Webhook
+    # تهيئة الويب هوك ثم تشغيل خادم Flask
     asyncio.run(setup_webhook())
-    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
