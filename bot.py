@@ -17,7 +17,7 @@ DB = "bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# اتصال عالمي واحد لقاعدة البيانات
+# اتصال عالمي واحد لقاعدة البيانات لتجنب "Database is locked"
 db_conn = None
 
 async def get_db():
@@ -47,6 +47,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
+# 2. الدوال الأساسية
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -81,6 +82,7 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+# 3. معالجات الأوامر
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -106,11 +108,18 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
+# 4. الـ Webhook مع التشغيل المتوازي (للخروج من مشاكل الـ Loop)
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ensure_initialized()
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    json_data = request.get_json(force=True)
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        update = Update.de_json(json_data, bot_app.bot)
+        loop.run_until_complete(bot_app.process_update(update))
+        loop.close()
+    
+    threading.Thread(target=run_async).start()
     return "ok", 200
 
 @app.route("/")
