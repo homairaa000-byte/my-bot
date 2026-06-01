@@ -92,21 +92,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+    # إضافة cache_time=0 يضمن تحديث الواجهة فوراً
+    await q.answer(cache_time=0)
     
     chat_id = q.message.chat_id
     user_id = q.from_user.id
+    # استخدام first_name فقط للحصول على اسم نظيف
+    user_name = q.from_user.first_name
     action = q.data
     conn = await get_db()
 
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, user_name))
         else:
             if await get_locked(chat_id):
                 await conn.close()
                 return
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, user_name, action))
     elif action == "read":
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
@@ -117,14 +120,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
     await conn.commit()
-    # جلب النص المحدث فوراً قبل إغلاق الاتصال بقاعدة البيانات
     new_text = await build(chat_id)
     await conn.close()
     
-    # تحديث الواجهة فوراً
+    # تحديث الواجهة
     await q.edit_message_text(text=new_text, reply_markup=menu())
 
-bot_app.add_handler(CommandHandler("start", start))
+# التعامل مع الأمر سواء كان مع معرف البوت أو بدونه
+bot_app.add_handler(CommandHandler(["start", "start@Handelakademytbot"], start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
