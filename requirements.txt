@@ -1,2 +1,4 @@
+flask
 python-telegram-bot==22.1
-aiosqlite==0.21.0
+aiosqlite
+gunicorn
