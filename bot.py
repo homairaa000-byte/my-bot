@@ -10,27 +10,26 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
-DB = "/tmp/bot.db" 
+WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
+DB = "/tmp/bot.db"
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # --- تهيئة Loop عالمية للتحكم في الربط ---
+# هذا الجزء يحمي البوت من الانهيار عند استقبال Webhook
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# --- قاعدة البيانات ---
 def db(): return sqlite3.connect(DB, check_same_thread=False)
 
 def init():
     with db() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
-
 init()
 
-# --- دالة البناء والقائمة (تنسيقك الأصلي بالكامل) ---
+# --- التنسيقات ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -62,7 +61,7 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# --- المعالجات (تنسيقك الأصلي بالكامل) ---
+# --- المعالجات ---
 async def start(update, context):
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
@@ -86,7 +85,6 @@ async def buttons(update, context):
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-# --- إعداد البوت ---
 bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
@@ -95,6 +93,7 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    # استخدام thread-safe لجدولة المهمة في الحلقة العالمية
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
 
