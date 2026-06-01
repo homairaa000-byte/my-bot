@@ -5,7 +5,7 @@ import aiosqlite
 import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 # 1. الإعدادات
 TOKEN = os.getenv("BOT_TOKEN")
@@ -17,7 +17,7 @@ DB = "bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# اتصال عالمي واحد لقاعدة البيانات لتجنب "Database is locked"
+# اتصال عالمي واحد لقاعدة البيانات
 db_conn = None
 
 async def get_db():
@@ -105,23 +105,4 @@ async def buttons(update, context):
     await conn.commit()
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
-# 4. الـ Webhook مع التشغيل المتوازي (للخروج من مشاكل الـ Loop)
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    json_data = request.get_json(force=True)
-    def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        update = Update.de_json(json_data, bot_app.bot)
-        loop.run_until_complete(bot_app.process_update(update))
-        loop.close()
-    
-    threading.Thread(target=run_async).start()
-    return "ok", 200
-
-@app.route("/")
-def home():
-    return "Bot is active", 200
+# أداة تشخيص:
