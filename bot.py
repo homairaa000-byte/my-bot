@@ -5,7 +5,7 @@ import aiosqlite
 from datetime import datetime
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 # =========================
 # SETTINGS
@@ -17,15 +17,14 @@ DB = "bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# =========================
-# BOT INIT (FIXED ONLY)
-# =========================
-
 bot = Bot(TOKEN)
 bot_app = Application.builder().token(TOKEN).build()
 
-initialized = False
+# =========================
+# INIT FIX
+# =========================
 
+initialized = False
 
 async def init_bot():
     global initialized
@@ -35,7 +34,7 @@ async def init_bot():
 
 
 # =========================
-# DB (FIXED SAFE CLOSE)
+# DATABASE
 # =========================
 
 async def get_db():
@@ -64,7 +63,7 @@ async def get_db():
 
 
 # =========================
-# YOUR ORIGINAL FUNCTIONS (UNCHANGED)
+# FUNCTIONS (UNCHANGED STYLE)
 # =========================
 
 async def get_locked(chat_id):
@@ -78,8 +77,8 @@ async def get_locked(chat_id):
     async with conn.execute(
         "SELECT locked FROM groups WHERE chat_id=?",
         (chat_id,)
-    ) as cursor:
-        row = await cursor.fetchone()
+    ) as c:
+        row = await c.fetchone()
 
     await conn.close()
     return row[0] if row else 0
@@ -93,8 +92,8 @@ async def build(chat_id):
     async with conn.execute(
         "SELECT name,status,read_status FROM users WHERE chat_id=?",
         (chat_id,)
-    ) as cursor:
-        data = await cursor.fetchall()
+    ) as c:
+        data = await c.fetchall()
 
     await conn.close()
 
@@ -103,8 +102,8 @@ async def build(chat_id):
 
     def section(status):
         result = [
-            f"{name}{' ✅' if read_status == 1 else ''}"
-            for name, st, read_status in data if st == status
+            f"{name}{' ✅' if r == 1 else ''}"
+            for name, s, r in data if s == status
         ]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
@@ -112,7 +111,8 @@ async def build(chat_id):
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
         "خادم القرآن الرقمي 💫\n"
-        f"{status_text}\nقائمة تسجيل الأدوار 📝\n\n"
+        f"{status_text}\n"
+        "قائمة تسجيل الأدوار 📝\n\n"
         f"✍️ المسجلات:\n{section('register')}\n\n"
         f"⛔️ المعتذرات:\n{section('excused')}\n\n"
         f"🎧 المستمعات:\n{section('listener')}\n\n"
@@ -120,6 +120,10 @@ async def build(chat_id):
         "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
     )
 
+
+# =========================
+# MENU (UNCHANGED)
+# =========================
 
 def menu():
     return InlineKeyboardMarkup([
@@ -138,15 +142,15 @@ def menu():
 
 
 # =========================
-# HANDLERS (UNCHANGED LOGIC)
+# HANDLERS
 # =========================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(update, context):
     q = update.callback_query
     await q.answer()
 
@@ -212,7 +216,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# REGISTER HANDLERS
+# BOT SETUP
 # =========================
 
 bot_app.add_handler(CommandHandler("start", start))
@@ -220,7 +224,7 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 
 
 # =========================
-# WEBHOOK FIX (NO BREAK)
+# WEBHOOK FIX (SAFE)
 # =========================
 
 @app.route("/webhook", methods=["POST"])
@@ -229,7 +233,6 @@ def webhook():
 
     async def process():
         await init_bot()
-
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
 
