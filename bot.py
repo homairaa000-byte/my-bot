@@ -3,7 +3,6 @@ import asyncio
 import aiosqlite
 from datetime import datetime
 import logging
-
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,23 +15,20 @@ from telegram.ext import (
 # =========================
 # SETTINGS
 # =========================
-
 TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
 
 # =========================
-# BOT
+# BOT & FLASK
 # =========================
-
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
 # DATABASE
 # =========================
-
 async def get_db():
     conn = await aiosqlite.connect(DB)
     await conn.execute("PRAGMA journal_mode=WAL;")
@@ -58,7 +54,6 @@ async def get_db():
 # =========================
 # BUILD MESSAGE
 # =========================
-
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -94,10 +89,6 @@ async def build(chat_id):
         "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
     )
 
-# =========================
-# MENU
-# =========================
-
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"),
@@ -113,7 +104,6 @@ def menu():
 # =========================
 # HANDLERS
 # =========================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -121,47 +111,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
-
     conn = await get_db()
 
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
-            await conn.execute("""
-                INSERT OR REPLACE INTO users
-                (chat_id, user_id, name, status, read_status)
-                VALUES (?, ?, ?, 'banned', 0)
-            """, (chat_id, user_id, q.from_user.full_name))
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
         else:
             if await get_locked(chat_id):
                 await conn.close()
                 return
-            await conn.execute("""
-                INSERT OR REPLACE INTO users
-                (chat_id, user_id, name, status, read_status)
-                VALUES (?, ?, ?, ?, 0)
-            """, (chat_id, user_id, q.from_user.full_name, action))
-
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
     elif action == "read":
-        await conn.execute("""
-            UPDATE users
-            SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END
-            WHERE chat_id=? AND user_id=?
-        """, (chat_id, user_id))
-
+        await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
         await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-
     elif action == "lock":
-        await conn.execute("""
-            UPDATE groups
-            SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END
-            WHERE chat_id=?
-        """, (chat_id,))
-
+        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
     elif action == "reset":
         await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
@@ -169,14 +137,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await conn.close()
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
-# =========================
-# FLASK ROUTE FOR WEBHOOK
-# =========================
+# إضافة الهاندلرز للتطبيق
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
 
+# =========================
+# WEBHOOK
+# =========================
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    loop = asyncio.get_event_loop()
-    loop.create_task(bot_app.process_update(update))
+    asyncio.run(bot_app.process_update(update))
     return "ok", 200
