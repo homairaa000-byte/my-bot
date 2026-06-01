@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import aiosqlite
+import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -19,7 +20,25 @@ app = Flask(__name__)
 # تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
 
-# تعريف الدوال (قاعدة البيانات والواجهة)
+# قفل للتهيئة لضمان عدم تكرارها
+init_lock = threading.Lock()
+initialized = False
+
+def ensure_initialized():
+    global initialized
+    if not initialized:
+        with init_lock:
+            if not initialized:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(init_db())
+                loop.run_until_complete(bot_app.initialize())
+                loop.run_until_complete(bot_app.start())
+                if WEBHOOK_URL:
+                    loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
+                initialized = True
+
+# --- الدوال الخاصة بالبوت (لا تغيير فيها) ---
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
@@ -85,18 +104,12 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# تهيئة الـ Webhook بدون التسبب في تعارض
-@app.before_first_request
-def setup_webhook():
-    asyncio.run(init_db())
-    asyncio.run(bot_app.initialize())
-    asyncio.run(bot_app.bot.set_webhook(WEBHOOK_URL))
-
+# --- المسارات ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # معالجة التحديث باستخدام asyncio.run_coroutine_threadsafe لضمان توافقه مع Gunicorn
+    ensure_initialized()  # التأكد من تهيئة البوت قبل المعالجة
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
 if __name__ == "__main__":
