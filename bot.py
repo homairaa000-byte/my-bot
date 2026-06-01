@@ -1,7 +1,6 @@
 import os
 import logging
 import asyncio
-import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -10,11 +9,10 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
-DB = "/tmp/bot.db" 
+WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
+DB = "/tmp/bot.db"
 
 logging.basicConfig(level=logging.INFO)
-
 app = Flask(__name__)
 
 # --- قاعدة البيانات ---
@@ -59,7 +57,9 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# --- المعالجات ---
+# --- تهيئة البوت ---
+bot_app = Application.builder().token(TOKEN).build()
+
 async def start(update, context):
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
@@ -79,20 +79,15 @@ async def buttons(update, context):
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-# --- إعداد البوت ---
-bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# --- المسار المصحح ---
+# --- المسارات ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # الحصول على الـ loop الحالي الخاص بالعملية
-    loop = asyncio.get_event_loop()
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    
-    # جدولة المعالجة داخل الـ loop
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    # استخدام threadsafe لضمان عدم تعارض الـ loop مع Flask
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
 @app.route('/')
@@ -102,15 +97,12 @@ async def setup_bot():
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
     await bot_app.start()
-    await bot_app.updater.start_polling() # تم إضافتها لضمان التفاعل في بيئة Render
 
 if __name__ == '__main__':
-    # تهيئة الـ Event Loop لضمان عدم وجود أخطاء في الـ Threads
+    # إنشاء Loop خاص وإسناده للبوت
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    bot_app.loop = loop 
     
-    # تشغيل تهيئة البوت
     loop.run_until_complete(setup_bot())
-    
-    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
