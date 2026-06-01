@@ -10,7 +10,6 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-# الرابط الثابت للويب هوك
 WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
 DB = "/tmp/bot.db" 
 
@@ -28,7 +27,7 @@ def init():
 
 init()
 
-# --- دالة البناء ---
+# --- دالة البناء والقائمة ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -85,10 +84,15 @@ bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
+# --- المسار المصحح ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # الحصول على الـ loop الحالي الخاص بالعملية
+    loop = asyncio.get_event_loop()
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
+    
+    # جدولة المعالجة داخل الـ loop
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
 
 @app.route('/')
@@ -98,11 +102,14 @@ async def setup_bot():
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
     await bot_app.start()
+    await bot_app.updater.start_polling() # تم إضافتها لضمان التفاعل في بيئة Render
 
 if __name__ == '__main__':
-    # إنشاء وإعداد الـ Event Loop لضمان الاستقرار
+    # تهيئة الـ Event Loop لضمان عدم وجود أخطاء في الـ Threads
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    # تشغيل تهيئة البوت
     loop.run_until_complete(setup_bot())
     
     # تشغيل Flask
