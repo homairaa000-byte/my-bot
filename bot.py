@@ -20,7 +20,7 @@ app = Flask(__name__)
 # تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
 
-# قفل للتهيئة لضمان عدم تكرارها
+# قفل لضمان تهيئة البوت مرة واحدة فقط
 init_lock = threading.Lock()
 initialized = False
 
@@ -29,8 +29,10 @@ def ensure_initialized():
     if not initialized:
         with init_lock:
             if not initialized:
+                # إنشاء حلقة حدث للتهيئة
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                # تهيئة قاعدة البيانات والبوت
                 loop.run_until_complete(init_db())
                 loop.run_until_complete(bot_app.initialize())
                 loop.run_until_complete(bot_app.start())
@@ -38,7 +40,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# --- الدوال الخاصة بالبوت (لا تغيير فيها) ---
+# --- دوال قاعدة البيانات والواجهة ---
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
@@ -107,10 +109,14 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # --- المسارات ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ensure_initialized()  # التأكد من تهيئة البوت قبل المعالجة
+    ensure_initialized()  # التأكد من التهيئة
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
+
+@app.route("/")
+def home():
+    return "Bot is active", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
