@@ -4,6 +4,7 @@ import aiosqlite
 from datetime import datetime
 import logging
 
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -26,6 +27,7 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 
 app = Application.builder().token(TOKEN).build()
+flask_app = Flask(__name__)
 
 # =========================
 # DATABASE
@@ -33,15 +35,13 @@ app = Application.builder().token(TOKEN).build()
 
 async def get_db():
     conn = await aiosqlite.connect(DB)
-    await conn.execute("PRAGMA journal_mode=WAL;")  # يقلل مشاكل الـ lock
-
+    await conn.execute("PRAGMA journal_mode=WAL;")
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS groups (
             chat_id INTEGER PRIMARY KEY,
             locked INTEGER DEFAULT 0
         )
     """)
-
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             chat_id INTEGER,
@@ -52,10 +52,8 @@ async def get_db():
             PRIMARY KEY(chat_id, user_id)
         )
     """)
-
     await conn.commit()
     return conn
-
 
 # =========================
 # BUILD MESSAGE
@@ -68,7 +66,6 @@ async def get_locked(chat_id):
         row = await c.fetchone()
     await conn.close()
     return row[0] if row else 0
-
 
 async def build(chat_id):
     conn = await get_db()
@@ -97,7 +94,6 @@ async def build(chat_id):
         "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
     )
 
-
 # =========================
 # MENU
 # =========================
@@ -114,7 +110,6 @@ def menu():
          InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-
 # =========================
 # HANDLERS
 # =========================
@@ -122,7 +117,6 @@ def menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
-
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -175,15 +169,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await conn.close()
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
-
 # =========================
-# MAIN (FOR RENDER)
+# FLASK ROUTE FOR WEBHOOK
 # =========================
 
-async def main():
-    await app.initialize()
-    await app.start()
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, app.bot)
+    asyncio.get_event_loop().create_task(app.process_update(update))
+    return "ok", 200
