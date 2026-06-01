@@ -3,9 +3,10 @@ import logging
 import asyncio
 import aiosqlite
 import threading
+from datetime import datetime
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 # 1. الإعدادات
 TOKEN = os.getenv("BOT_TOKEN")
@@ -17,9 +18,7 @@ DB = "bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# اتصال عالمي واحد لقاعدة البيانات
 db_conn = None
-
 async def get_db():
     global db_conn
     if db_conn is None:
@@ -29,12 +28,10 @@ async def get_db():
         await db_conn.commit()
     return db_conn
 
-# بناء التطبيق
 bot_app = Application.builder().token(TOKEN).build()
 init_lock = threading.Lock()
 initialized = False
 
-# دالة التهيئة المضمونة
 def ensure_initialized():
     global initialized
     if not initialized:
@@ -42,7 +39,6 @@ def ensure_initialized():
             if not initialized:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                # الخطوات بالترتيب الصحيح
                 loop.run_until_complete(bot_app.initialize())
                 loop.run_until_complete(get_db())
                 loop.run_until_complete(bot_app.start())
@@ -50,7 +46,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# 2. الدوال الأساسية (Start, Build, Buttons...)
+# 2. الدوال الأساسية
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -65,26 +61,33 @@ async def build(chat_id):
         data = await cursor.fetchall()
     
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
     def section(status):
         result = [f"{name}{' ✅' if read_status == 1 else ''}" for name, st, read_status in data if st == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
     
     return (
-        "السلام عليكم ورحمة الله وبركاته\n\nخادم القرآن الرقمي 💫\n"
+        "السلام عليكم ورحمة الله وبركاته\n"
+        f"📅 {date_str}\n\n"
+        "خادم القرآن الرقمي 💫\n"
         f"{status_text}\nقائمة تسجيل الأدوار 📝\n\n"
         f"✍️ المسجلات:\n{section('register')}\n\n"
         f"⛔️ المعتذرات:\n{section('excused')}\n\n"
         f"🎧 المستمعات:\n{section('listener')}\n\n"
+        f"🚫 المحظورات:\n{section('banned')}\n\n"
+        "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
     )
 
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")],
-        [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("🚫 حظر", callback_data="ban"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+# 3. المعالجات
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -97,43 +100,38 @@ async def buttons(update, context):
     action = q.data
     conn = await get_db()
     
-    if action in ["register", "listener", "excused"]:
-        if await get_locked(chat_id): return
-        await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", (chat_id, user_id, q.from_user.full_name, action))
-    elif action == "read": await conn.execute("UPDATE users SET read_status=1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    if action in ["register", "listener", "excused", "ban"]:
+        if action == "ban":
+            # إضافة منطق الحظر (يمكنك تغييره ليصبح خاصاً بالمشرفين لاحقاً)
+            await conn.execute("UPDATE users SET status='banned' WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        else:
+            if await get_locked(chat_id): return
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", (chat_id, user_id, q.from_user.full_name, action))
+    
+    # تبديل حالة "قرأت" (Toggle logic)
+    elif action == "read": 
+        await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    
     elif action == "remove": await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "lock": await conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
     elif action == "reset": await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+    
     await conn.commit()
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
-# معالج تشخيصي جديد
-async def echo(update, context):
-    await update.message.reply_text("تم استلام رسالتك!")
-
-# إضافة المعالجات
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
-bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
 # 4. الـ Webhook
+main_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(main_loop)
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ensure_initialized() # التأكد من التهيئة قبل أي خطوة
+    ensure_initialized()
     json_data = request.get_json(force=True)
-    
-    def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            update = Update.de_json(json_data, bot_app.bot)
-            loop.run_until_complete(bot_app.process_update(update))
-        except Exception as e:
-            print(f"Error in background task: {e}")
-        finally:
-            loop.close()
-    
-    threading.Thread(target=run_async).start()
+    update = Update.de_json(json_data, bot_app.bot)
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), main_loop)
     return "ok", 200
 
 @app.route("/")
