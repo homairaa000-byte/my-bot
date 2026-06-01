@@ -37,7 +37,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# 2. الدوال الأساسية (كاملة بدون حذف)
+# 2. الدوال الأساسية
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
@@ -104,14 +104,8 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. الـ Webhook
+# 4. الـ Webhook المحدث
 @app.route("/webhook", methods=["POST"])
 def webhook():
     ensure_initialized()
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
-    return "ok", 200
-
-@app.route("/")
-def home():
-    return "Bot is active", 200
+    update = Update.de_json(request.get_json(force=
