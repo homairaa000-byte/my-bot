@@ -27,7 +27,6 @@ def ensure_initialized():
     if not initialized:
         with init_lock:
             if not initialized:
-                # نستخدم حلقة حدث جديدة لضمان استقرار التشغيل
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(init_db())
@@ -104,21 +103,15 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. الـ Webhook المنقح (حل مشكلة الـ Loop)
+# 4. الـ Webhook المنقح (آمن تماماً)
 @app.route("/webhook", methods=["POST"])
 def webhook():
     ensure_initialized()
+    # جلب التحديث ومعالجته في سياق حلقة الحدث الخاصة بالبوت
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    
-    # استخدام حلقة حدث آمنة
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot_app.process_update(update))
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
 
 @app.route("/")
 def home():
     return "Bot is active", 200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
