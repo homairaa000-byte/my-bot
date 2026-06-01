@@ -21,7 +21,7 @@ bot = Bot(TOKEN)
 bot_app = Application.builder().token(TOKEN).build()
 
 # =========================
-# INIT FIX
+# SAFE INIT (FIXED)
 # =========================
 
 initialized = False
@@ -34,36 +34,42 @@ async def init_bot():
 
 
 # =========================
-# DATABASE
+# GLOBAL DB CONNECTION (IMPORTANT FIX)
 # =========================
+
+db_conn = None
 
 async def get_db():
-    conn = await aiosqlite.connect(DB)
+    global db_conn
 
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS groups (
-            chat_id INTEGER PRIMARY KEY,
-            locked INTEGER DEFAULT 0
-        )
-    """)
+    if db_conn is None:
+        db_conn = await aiosqlite.connect(DB)
 
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            chat_id INTEGER,
-            user_id INTEGER,
-            name TEXT,
-            status TEXT,
-            read_status INTEGER DEFAULT 0,
-            PRIMARY KEY(chat_id, user_id)
-        )
-    """)
+        await db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
+                chat_id INTEGER PRIMARY KEY,
+                locked INTEGER DEFAULT 0
+            )
+        """)
 
-    await conn.commit()
-    return conn
+        await db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                chat_id INTEGER,
+                user_id INTEGER,
+                name TEXT,
+                status TEXT,
+                read_status INTEGER DEFAULT 0,
+                PRIMARY KEY(chat_id, user_id)
+            )
+        """)
+
+        await db_conn.commit()
+
+    return db_conn
 
 
 # =========================
-# FUNCTIONS (UNCHANGED STYLE)
+# FUNCTIONS (UNCHANGED LOGIC)
 # =========================
 
 async def get_locked(chat_id):
@@ -80,7 +86,6 @@ async def get_locked(chat_id):
     ) as c:
         row = await c.fetchone()
 
-    await conn.close()
     return row[0] if row else 0
 
 
@@ -94,8 +99,6 @@ async def build(chat_id):
         (chat_id,)
     ) as c:
         data = await c.fetchall()
-
-    await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -142,7 +145,7 @@ def menu():
 
 
 # =========================
-# HANDLERS
+# HANDLERS (FIXED FAST RESPONSE)
 # =========================
 
 async def start(update, context):
@@ -152,7 +155,9 @@ async def start(update, context):
 
 async def buttons(update, context):
     q = update.callback_query
-    await q.answer()
+
+    # FIX: fast response (حل مشكلة الضغط مرتين)
+    await q.answer(cache_time=0)
 
     chat_id = q.message.chat_id
     user_id = q.from_user.id
@@ -169,7 +174,6 @@ async def buttons(update, context):
             )
         else:
             if await get_locked(chat_id):
-                await conn.close()
                 return
 
             await conn.execute("""
@@ -210,13 +214,13 @@ async def buttons(update, context):
         )
 
     await conn.commit()
-    await conn.close()
 
-    await q.edit_message_text(await build(chat_id), reply_markup=menu())
+    text = await build(chat_id)
+    await q.edit_message_text(text, reply_markup=menu())
 
 
 # =========================
-# BOT SETUP
+# REGISTER HANDLERS
 # =========================
 
 bot_app.add_handler(CommandHandler("start", start))
@@ -224,7 +228,7 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 
 
 # =========================
-# WEBHOOK FIX (SAFE)
+# WEBHOOK (FIXED FOR RENDER)
 # =========================
 
 @app.route("/webhook", methods=["POST"])
@@ -236,7 +240,10 @@ def webhook():
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
 
-    asyncio.run(process())
+    # FIX: avoid asyncio.run crash on Render
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(process())
 
     return "ok", 200
 
@@ -251,4 +258,5 @@ def home():
 # =========================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
