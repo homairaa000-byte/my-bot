@@ -1,11 +1,15 @@
 import os
 import logging
-import asyncio
 import aiosqlite
 from datetime import datetime
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
 # =========================
 # SETTINGS
@@ -15,29 +19,9 @@ TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
-app = Flask(__name__)
-
-bot = Bot(TOKEN)
-bot_app = Application.builder().token(TOKEN).build()
 
 # =========================
-# INIT FIX (IMPORTANT)
-# =========================
-
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-initialized = False
-
-async def init_bot():
-    global initialized
-    if not initialized:
-        await bot_app.initialize()
-        initialized = True
-
-
-# =========================
-# DATABASE (FIXED CONNECTION HANDLING)
+# DB
 # =========================
 
 async def get_db():
@@ -66,7 +50,7 @@ async def get_db():
 
 
 # =========================
-# FUNCTIONS
+# LOGIC
 # =========================
 
 async def get_locked(chat_id):
@@ -108,13 +92,13 @@ async def build(chat_id):
             f"{name}{' ✅' if r == 1 else ''}"
             for name, s, r in data if s == status
         ]
-        return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
+        return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) or "لا يوجد"
 
     return (
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
         "خادم القرآن الرقمي 💫\n"
-        f"{status_text}\n"
+        f"{status_text}\n\n"
         "قائمة تسجيل الأدوار 📝\n\n"
         f"✍️ المسجلات:\n{section('register')}\n\n"
         f"⛔️ المعتذرات:\n{section('excused')}\n\n"
@@ -145,15 +129,15 @@ def menu():
 
 
 # =========================
-# HANDLERS (FIXED FAST RESPONSE)
+# HANDLERS
 # =========================
 
-async def start(update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
 
-async def buttons(update, context):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer(cache_time=0)
 
@@ -170,3 +154,76 @@ async def buttons(update, context):
                 "UPDATE users SET status='banned' WHERE chat_id=? AND user_id=?",
                 (chat_id, user_id)
             )
+        else:
+            if await get_locked(chat_id):
+                await conn.close()
+                return
+
+            await conn.execute("""
+                INSERT OR REPLACE INTO users
+                (chat_id, user_id, name, status, read_status)
+                VALUES (?, ?, ?, ?, COALESCE((SELECT read_status FROM users WHERE chat_id=? AND user_id=?),0))
+            """, (
+                chat_id,
+                user_id,
+                q.from_user.full_name,
+                action,
+                chat_id,
+                user_id
+            ))
+
+    elif action == "read":
+        await conn.execute("""
+            UPDATE users
+            SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END
+            WHERE chat_id=? AND user_id=?
+        """, (chat_id, user_id))
+
+    elif action == "remove":
+        await conn.execute(
+            "DELETE FROM users WHERE chat_id=? AND user_id=?",
+            (chat_id, user_id)
+        )
+
+    elif action == "lock":
+        await conn.execute("""
+            UPDATE groups
+            SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END
+            WHERE chat_id=?
+        """, (chat_id,))
+
+    elif action == "reset":
+        await conn.execute(
+            "DELETE FROM users WHERE chat_id=?",
+            (chat_id,)
+        )
+
+    await conn.commit()
+    await conn.close()
+
+    await q.edit_message_text(await build(chat_id), reply_markup=menu())
+
+
+# =========================
+# APP
+# =========================
+
+app = Application.builder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(buttons))
+
+
+# =========================
+# RUN WEBHOOK (NO FLASK)
+# =========================
+
+if __name__ == "__main__":
+    PORT = int(os.getenv("PORT", 10000))
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
+    )
