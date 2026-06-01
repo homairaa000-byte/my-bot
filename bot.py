@@ -6,9 +6,7 @@ from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# =====================================
-# الإعدادات
-# =====================================
+# 1. الإعدادات
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", "10000"))
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
@@ -19,28 +17,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-# تهيئة البوت (بدون تشغيله بعد)
 bot_app = Application.builder().token(TOKEN).build()
 
-# =====================================
-# تهيئة البوت وقاعدة البيانات (تُنفذ مرة واحدة)
-# =====================================
-async def setup_bot():
-    await init_db()
-    await bot_app.initialize()
-    await bot_app.start()
-    if WEBHOOK_URL:
-        await bot_app.bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-
-# إنشاء حلقة الحدث (Event Loop) للعمل في الخلفية
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(setup_bot())
-
-# =====================================
-# Database Functions
-# =====================================
+# 2. تعريف الدوال أولاً (قاعدة البيانات والواجهة)
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
@@ -89,14 +68,12 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# =====================================
-# Handlers
-# =====================================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 3. معالجات الأوامر
+async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(update, context):
     q = update.callback_query
     await q.answer()
     chat_id = q.message.chat_id
@@ -126,19 +103,24 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# =====================================
-# Webhook (Final Fix)
-# =====================================
+# 4. الـ Webhook وتهيئة التشغيل (يتم وضعها في النهاية)
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام الحلقة الموحدة لمعالجة الطلب
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
     loop.create_task(bot_app.process_update(update))
     return "ok", 200
 
-@app.route("/")
-def home():
-    return "Bot is running", 200
+async def setup_bot():
+    await init_db()
+    await bot_app.initialize()
+    await bot_app.start()
+    if WEBHOOK_URL:
+        await bot_app.bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(setup_bot())
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
