@@ -113,12 +113,13 @@ bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =====================================
-# Webhook & Flask
+# Webhook & Flask (Modified)
 # =====================================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run(bot_app.process_update(update))
+    # تعديل: نستخدم create_task لعدم حظر الـ Webhook
+    asyncio.create_task(bot_app.process_update(update))
     return "ok", 200
 
 @app.route("/")
@@ -128,8 +129,8 @@ def home():
 async def setup():
     await init_db()
     if WEBHOOK_URL:
+        # تأكد من ضبط الـ Webhook عند بدء التشغيل
         await bot_app.bot.set_webhook(WEBHOOK_URL)
 
 if __name__ == "__main__":
-    asyncio.run(setup())
-    app.run(host="0.0.0.0", port=PORT)
+    asyncio.run(setup
