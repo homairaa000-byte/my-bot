@@ -2,51 +2,30 @@ import os
 import logging
 import asyncio
 import aiosqlite
-import threading
 from datetime import datetime
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 # 1. الإعدادات
 TOKEN = os.getenv("BOT_TOKEN")
-PORT = int(os.getenv("PORT", "10000"))
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
-WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else None
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-db_conn = None
+# تهيئة البوت خارج Flask ليكون جاهزاً دائماً
+bot_app = Application.builder().token(TOKEN).build()
+bot = Bot(TOKEN)
+
 async def get_db():
-    global db_conn
-    if db_conn is None:
-        db_conn = await aiosqlite.connect(DB)
-        await db_conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
-        await db_conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
-        await db_conn.commit()
+    db_conn = await aiosqlite.connect(DB)
+    await db_conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
+    await db_conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
+    await db_conn.commit()
     return db_conn
 
-bot_app = Application.builder().token(TOKEN).build()
-init_lock = threading.Lock()
-initialized = False
-
-def ensure_initialized():
-    global initialized
-    if not initialized:
-        with init_lock:
-            if not initialized:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(bot_app.initialize())
-                loop.run_until_complete(get_db())
-                loop.run_until_complete(bot_app.start())
-                if WEBHOOK_URL:
-                    loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
-                initialized = True
-
-# 2. الدوال الأساسية (تم الإبقاء عليها كما هي)
+# 2. الدوال الأساسية (بدون تغيير)
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -87,7 +66,7 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# 3. المعالجات
+# 3. المعالجات (تم تعريفها هنا)
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -118,14 +97,14 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. معالجة الـ Webhook بدون إغلاق الحلقة (مستقر)
+# 4. الـ Webhook المستقر (بدون تدخل الـ loop اليدوي)
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ensure_initialized()
+    # تمرير البيانات مباشرة لتليجرام
     json_data = request.get_json(force=True)
-    update = Update.de_json(json_data, bot_app.bot)
-    # نستخدم asyncio لإنشاء المهمة بدلاً من إدارة الحلقة يدوياً
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    update = Update.de_json(json_data, bot)
+    # تشغيل المعالجة في حلقة أحداث جديدة لكل طلب لضمان عدم التعارض
+    asyncio.run(bot_app.process_update(update))
     return "ok", 200
 
 @app.route("/")
