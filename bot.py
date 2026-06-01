@@ -46,7 +46,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# 2. الدوال الأساسية
+# 2. الدوال الأساسية (تم الإبقاء عليها كما هي)
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -102,16 +102,12 @@ async def buttons(update, context):
     
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
-            # إضافة منطق الحظر (يمكنك تغييره ليصبح خاصاً بالمشرفين لاحقاً)
             await conn.execute("UPDATE users SET status='banned' WHERE chat_id=? AND user_id=?", (chat_id, user_id))
         else:
             if await get_locked(chat_id): return
             await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", (chat_id, user_id, q.from_user.full_name, action))
-    
-    # تبديل حالة "قرأت" (Toggle logic)
     elif action == "read": 
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    
     elif action == "remove": await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "lock": await conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
     elif action == "reset": await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
@@ -122,16 +118,14 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. الـ Webhook
-main_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(main_loop)
-
+# 4. معالجة الـ Webhook بدون إغلاق الحلقة (مستقر)
 @app.route("/webhook", methods=["POST"])
 def webhook():
     ensure_initialized()
     json_data = request.get_json(force=True)
     update = Update.de_json(json_data, bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), main_loop)
+    # نستخدم asyncio لإنشاء المهمة بدلاً من إدارة الحلقة يدوياً
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
 
 @app.route("/")
