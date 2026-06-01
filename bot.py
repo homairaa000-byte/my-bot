@@ -10,13 +10,13 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
+# الرابط الثابت للويب هوك
 WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
 DB = "/tmp/bot.db" 
 
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
-bot_app = Application.builder().token(TOKEN).build()
 
 # --- قاعدة البيانات ---
 def db(): return sqlite3.connect(DB, check_same_thread=False)
@@ -80,14 +80,14 @@ async def buttons(update, context):
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
+# --- إعداد البوت ---
+bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# --- المسارات ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    # استخدام loop الموجود في الـ app
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
@@ -95,13 +95,15 @@ def webhook():
 def index(): return "Bot is running", 200
 
 async def setup_bot():
-    # الخطوة الحيوية المفقودة
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
     await bot_app.start()
 
 if __name__ == '__main__':
-    # تهيئة كل شيء قبل التشغيل
-    loop = asyncio.get_event_loop()
+    # إنشاء وإعداد الـ Event Loop لضمان الاستقرار
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(setup_bot())
+    
+    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
