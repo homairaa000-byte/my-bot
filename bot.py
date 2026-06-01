@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 from flask import Flask, request
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 import sqlite3
 
@@ -24,7 +24,7 @@ def init():
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 init()
 
-# --- دالة البناء (كما هي) ---
+# --- دالة البناء (مع التنسيقات الأصلية) ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -43,13 +43,18 @@ def build(chat_id):
                 res.append(f"{n}{mark}")
         return "لا يوجد" if not res else "\n".join(f"{i+1}- {item}" for i, item in enumerate(res))
     
-    return f"خادم القرآن الرقمي 💫\n{status_text}\n\n✍️ المسجلات:\n{f('register')}\n\n⛔️ المعتذرات:\n{f('excused')}\n\n🎧 المستمعات:\n{f('listener')}"
+    return (f"السلام عليكم ورحمة الله وبركاته\n\nخادم القرآن الرقمي 💫\n{status_text}\nقائمة تسجيل الأدوار 📝\n\n"
+            f"✍️ المسجلات:\n{f('register')}\n\n⛔️ المعتذرات:\n{f('excused')}\n\n"
+            f"🎧 المستمعات:\n{f('listener')}\n\n🚫 المحظورات:\n{f('', banned=True)}\n\n"
+            f"وَلَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
+# --- القائمة (مع كافة الأزرار) ---
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("🧹 تصفير", callback_data="reset"), InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")],
+        [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
 # --- إعداد البوت ---
@@ -71,6 +76,10 @@ async def buttons(update, context):
             conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
         elif data == "remove": 
             conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        elif data == "reset":
+            conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        elif data == "read":
+            conn.execute("UPDATE users SET read_status = 1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
@@ -81,19 +90,16 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    # نستخدم asyncio.run لمعالجة التحديث بشكل منفصل لكل طلب
-    asyncio.run(bot_app.process_update(update))
+    loop = asyncio.get_event_loop()
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
 
 @app.route('/')
 def index(): return "Bot is running", 200
 
 if __name__ == '__main__':
-    # تهيئة البوت
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(bot_app.initialize())
     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
-    
-    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
