@@ -198,16 +198,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# MAIN FIX (IMPORTANT FOR RENDER)
+# MAIN (FOR RENDER)
 # =========================
 
 async def main():
     await app.initialize()
     await app.start()
     await app.run_polling()
-
-    print("BOT IS RUNNING (FINAL FIXED)")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
