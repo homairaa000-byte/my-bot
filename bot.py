@@ -118,41 +118,4 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
-        else:
-            if await get_locked(chat_id):
-                await conn.close()
-                return
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
-    elif action == "read":
-        await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    elif action == "remove":
-        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    elif action == "lock":
-        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
-    elif action == "reset":
-        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-
-    await conn.commit()
-    await conn.close()
-    await q.edit_message_text(await build(chat_id), reply_markup=menu())
-
-# إضافة الهاندلرز للتطبيق
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
-# تهيئة التطبيق عند بدء التشغيل
-loop = asyncio.get_event_loop()
-loop.run_until_complete(bot_app.initialize())
-
-# =========================
-# WEBHOOK
-# =========================
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
-    # استخدام loop الموجود مسبقاً
-    loop.create_task(bot_app.process_update(update))
-    return "ok", 200
-
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_
