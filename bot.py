@@ -122,14 +122,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
+# تهيئة الـ loop فقط
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-loop.run_until_complete(bot_app.initialize())
-loop.run_until_complete(bot_app.start())
 
+# =========================
+# WEBHOOK
+# =========================
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
+    
+    # تهيئة التطبيق عند وصول أول تحديث فقط
+    if not bot_app.running:
+        loop.run_until_complete(bot_app.initialize())
+        
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
