@@ -1,8 +1,8 @@
 flask
 python-telegram-bot
-apscheduler
-pytz
 gunicorn
+gevent
+
 
 
 
