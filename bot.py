@@ -7,32 +7,29 @@ from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-# إعدادات
+# 1. الإعدادات
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", "10000"))
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else None
 DB = "bot.db"
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
-
-# قفل لضمان تهيئة البوت مرة واحدة فقط
 init_lock = threading.Lock()
 initialized = False
 
+# آلية تهيئة آمنة
 def ensure_initialized():
     global initialized
     if not initialized:
         with init_lock:
             if not initialized:
-                # إنشاء حلقة حدث للتهيئة
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                # تهيئة قاعدة البيانات والبوت
                 loop.run_until_complete(init_db())
                 loop.run_until_complete(bot_app.initialize())
                 loop.run_until_complete(bot_app.start())
@@ -40,7 +37,7 @@ def ensure_initialized():
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# --- دوال قاعدة البيانات والواجهة ---
+# 2. الدوال الأساسية (كاملة بدون حذف)
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
@@ -65,7 +62,7 @@ async def build(chat_id):
     def section(status):
         result = [f"{name}{' ✅' if read_status == 1 else ''}" for name, st, read_status in data if st == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
-
+    
     return (
         "السلام عليكم ورحمة الله وبركاته\n\nخادم القرآن الرقمي 💫\n"
         f"{status_text}\nقائمة تسجيل الأدوار 📝\n\n"
@@ -82,6 +79,7 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+# 3. معالجات الأوامر
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -106,17 +104,14 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# --- المسارات ---
+# 4. الـ Webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ensure_initialized()  # التأكد من التهيئة
+    ensure_initialized()
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
 
 @app.route("/")
 def home():
     return "Bot is active", 200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
