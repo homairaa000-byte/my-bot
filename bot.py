@@ -63,43 +63,25 @@ async def get_db():
 
 async def get_locked(chat_id):
     conn = await get_db()
-
-    await conn.execute(
-        "INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)",
-        (chat_id,)
-    )
-
-    async with conn.execute(
-        "SELECT locked FROM groups WHERE chat_id=?",
-        (chat_id,)
-    ) as c:
+    await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
+    async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
         row = await c.fetchone()
-
     await conn.close()
     return row[0] if row else 0
 
 
 async def build(chat_id):
     conn = await get_db()
-
     locked = await get_locked(chat_id)
-
-    async with conn.execute(
-        "SELECT name,status,read_status FROM users WHERE chat_id=?",
-        (chat_id,)
-    ) as c:
+    async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
         data = await c.fetchall()
-
     await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     def section(status):
-        result = [
-            f"{name}{' ✅' if r == 1 else ''}"
-            for name, s, r in data if s == status
-        ]
+        result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
     return (
@@ -124,13 +106,10 @@ def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"),
          InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
-
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
          InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-
         [InlineKeyboardButton("🚫 حظر", callback_data="ban"),
          InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
-
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
          InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
