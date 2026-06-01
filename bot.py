@@ -206,7 +206,7 @@ async def main():
     await app.start()
     await app.run_polling()
 
-    print("BOT IS RUNNING (V5 FIXED)")
+    print("BOT IS RUNNING (FINAL FIXED)")
 
 
 if __name__ == "__main__":
