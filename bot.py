@@ -14,9 +14,14 @@ DB = "bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# تهيئة البوت خارج Flask ليكون جاهزاً دائماً
-bot_app = Application.builder().token(TOKEN).build()
+# تهيئة البوت ككائن عام (Global)
 bot = Bot(TOKEN)
+bot_app = Application.builder().token(TOKEN).build()
+
+# تهيئة البوت مرة واحدة عند بدء تشغيل الـ Worker
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(bot_app.initialize())
 
 async def get_db():
     db_conn = await aiosqlite.connect(DB)
@@ -25,7 +30,7 @@ async def get_db():
     await db_conn.commit()
     return db_conn
 
-# 2. الدوال الأساسية (بدون تغيير)
+# 2. الدوال الأساسية (تم الإبقاء عليها كما هي)
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -66,7 +71,7 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# 3. المعالجات (تم تعريفها هنا)
+# 3. المعالجات
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -97,14 +102,13 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. الـ Webhook المستقر (بدون تدخل الـ loop اليدوي)
+# 4. الـ Webhook المستقر
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # تمرير البيانات مباشرة لتليجرام
     json_data = request.get_json(force=True)
     update = Update.de_json(json_data, bot)
-    # تشغيل المعالجة في حلقة أحداث جديدة لكل طلب لضمان عدم التعارض
-    asyncio.run(bot_app.process_update(update))
+    # استخدام الحلقة المجهزة مسبقاً
+    loop.run_until_complete(bot_app.process_update(update))
     return "ok", 200
 
 @app.route("/")
