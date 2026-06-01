@@ -29,10 +29,12 @@ async def get_db():
         await db_conn.commit()
     return db_conn
 
+# بناء التطبيق
 bot_app = Application.builder().token(TOKEN).build()
 init_lock = threading.Lock()
 initialized = False
 
+# دالة التهيئة المضمونة
 def ensure_initialized():
     global initialized
     if not initialized:
@@ -40,14 +42,15 @@ def ensure_initialized():
             if not initialized:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(get_db())
+                # الخطوات بالترتيب الصحيح
                 loop.run_until_complete(bot_app.initialize())
+                loop.run_until_complete(get_db())
                 loop.run_until_complete(bot_app.start())
                 if WEBHOOK_URL:
                     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
                 initialized = True
 
-# 2. الدوال الأساسية
+# 2. الدوال الأساسية (Start, Build, Buttons...)
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -82,7 +85,6 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# 3. معالجات الأوامر
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -105,4 +107,35 @@ async def buttons(update, context):
     await conn.commit()
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
-# أداة تشخيص:
+# معالج تشخيصي جديد
+async def echo(update, context):
+    await update.message.reply_text("تم استلام رسالتك!")
+
+# إضافة المعالجات
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+# 4. الـ Webhook
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    ensure_initialized() # التأكد من التهيئة قبل أي خطوة
+    json_data = request.get_json(force=True)
+    
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            update = Update.de_json(json_data, bot_app.bot)
+            loop.run_until_complete(bot_app.process_update(update))
+        except Exception as e:
+            print(f"Error in background task: {e}")
+        finally:
+            loop.close()
+    
+    threading.Thread(target=run_async).start()
+    return "ok", 200
+
+@app.route("/")
+def home():
+    return "Bot is active", 200
