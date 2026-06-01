@@ -2,13 +2,15 @@ import os
 import logging
 import sqlite3
 import threading
-from datetime import datetime
+import asyncio
 import pytz
+from datetime import datetime
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from apscheduler.schedulers.background import BackgroundScheduler
 
-# إعداد المتغيرات
+# --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
 DB = "bot.db"
@@ -26,8 +28,39 @@ def init():
         conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 
+# --- المهام التلقائية مع الرسائل ---
+async def send_notification(application, text):
+    with db() as conn:
+        chats = conn.execute("SELECT chat_id FROM groups").fetchall()
+    for (chat_id,) in chats:
+        try:
+            await application.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logging.error(f"فشل إرسال التنبيه لـ {chat_id}: {e}")
+
+async def auto_toggle_lock(application, lock_status):
+    with db() as conn:
+        conn.execute("UPDATE groups SET locked = ?", (lock_status,))
+    
+    if lock_status == 1:
+        message = "أمسينا وأمسى الملك لله 🔐 تم قفل المجموعة"
+    else:
+        message = "أصبحنا وأصبح الملك لله 🔓 تم فتح المجموعة"
+        
+    await send_notification(application, message)
+
+def setup_scheduler(application):
+    scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Riyadh"))
+    # القفل الساعة 12 منتصف الليل
+    scheduler.add_job(lambda: asyncio.run_coroutine_threadsafe(auto_toggle_lock(application, 1), application.loop), 'cron', hour=0, minute=0)
+    # الفتح الساعة 8 صباحاً
+    scheduler.add_job(lambda: asyncio.run_coroutine_threadsafe(auto_toggle_lock(application, 0), application.loop), 'cron', hour=8, minute=0)
+    scheduler.start()
+
+# --- واجهة البوت ---
 def build(chat_id):
     with db() as conn:
+        conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
         locked = conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)).fetchone()
         is_locked = locked[0] if locked else 0
         data = conn.execute("SELECT name, status, is_banned, read_status FROM users WHERE chat_id=?", (chat_id,)).fetchall()
@@ -72,17 +105,17 @@ async def buttons(update, context):
 
         if data in ["register", "listener", "excused"]:
             if is_locked:
-                await q.answer("❌ التسجيل مغلق!", show_alert=True); return
+                await q.answer("❌ التسجيل مغلق حالياً!", show_alert=True); return
             conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, COALESCE((SELECT read_status FROM users WHERE chat_id=? AND user_id=?), 0))", (chat_id, user_id, q.from_user.full_name, data, chat_id, user_id))
         elif data == "lock":
             if (await context.bot.get_chat_member(chat_id, user_id)).status in ['creator', 'administrator']:
-                conn.execute("INSERT OR REPLACE INTO groups (chat_id, locked) VALUES (?, (SELECT CASE WHEN locked=0 THEN 1 ELSE 0 END FROM groups WHERE chat_id=?))", (chat_id, chat_id))
+                conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
             else: await q.answer("❌ للمشرفات فقط!", show_alert=True)
         elif data == "read":
             user = conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)).fetchone()
             if user and user[0] == 'register':
                 conn.execute("UPDATE users SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-            else: await q.answer("❌ سجل اسمك أولاً!", show_alert=True); return
+            else: await q.answer("❌ سجل اسمك أولاً كمسجلة!", show_alert=True); return
         elif data == "remove": conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
         elif data == "reset":
             if (await context.bot.get_chat_member(chat_id, user_id)).status in ['creator', 'administrator']:
@@ -94,36 +127,28 @@ async def start(update, context):
     init()
     await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
-async def help_command(update, context):
-    await update.message.reply_text("✨ **تعليمات خادم القرآن**\nاستخدم الأزرار للتسجيل.\n🚫 للحظر: ردي على رسالة العضوة بـ /ban أو /unban")
-
 async def ban_user(update, context):
     if (await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)).status in ['creator', 'administrator']:
         if update.message.reply_to_message:
             u_id = update.message.reply_to_message.from_user.id
             with db() as conn: conn.execute("UPDATE users SET is_banned = 1 WHERE user_id = ?", (u_id,))
             await update.message.reply_text("⛔️ تم حظر العضوة.")
-    
-async def unban_user(update, context):
-    if (await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)).status in ['creator', 'administrator']:
-        if update.message.reply_to_message:
-            u_id = update.message.reply_to_message.from_user.id
-            with db() as conn: conn.execute("UPDATE users SET is_banned = 0 WHERE user_id = ?", (u_id,))
-            await update.message.reply_text("✅ تم فك الحظر.")
 
 def main():
     if not TOKEN: return
     application = Application.builder().token(TOKEN).build()
+    
+    setup_scheduler(application) # تفعيل المجدول
+    
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("ban", ban_user))
-    application.add_handler(CommandHandler("unban", unban_user))
     application.add_handler(CallbackQueryHandler(buttons))
     
     def run_flask(): app_health.run(host="0.0.0.0", port=PORT)
     threading.Thread(target=run_flask, daemon=True).start()
     
-    # إضافة drop_pending_updates=True هنا لمنع تداخل الطلبات
     application.run_polling(drop_pending_updates=True)
 
-if __name__ == '__main__': main()
+if __name__ == '__main__': 
+    init()
+    main()
