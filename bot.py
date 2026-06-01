@@ -21,8 +21,11 @@ bot = Bot(TOKEN)
 bot_app = Application.builder().token(TOKEN).build()
 
 # =========================
-# SAFE INIT (FIXED)
+# INIT FIX (IMPORTANT)
 # =========================
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 initialized = False
 
@@ -34,42 +37,36 @@ async def init_bot():
 
 
 # =========================
-# GLOBAL DB CONNECTION (IMPORTANT FIX)
+# DATABASE (FIXED CONNECTION HANDLING)
 # =========================
-
-db_conn = None
 
 async def get_db():
-    global db_conn
+    conn = await aiosqlite.connect(DB)
 
-    if db_conn is None:
-        db_conn = await aiosqlite.connect(DB)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            chat_id INTEGER PRIMARY KEY,
+            locked INTEGER DEFAULT 0
+        )
+    """)
 
-        await db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS groups (
-                chat_id INTEGER PRIMARY KEY,
-                locked INTEGER DEFAULT 0
-            )
-        """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            chat_id INTEGER,
+            user_id INTEGER,
+            name TEXT,
+            status TEXT,
+            read_status INTEGER DEFAULT 0,
+            PRIMARY KEY(chat_id, user_id)
+        )
+    """)
 
-        await db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                chat_id INTEGER,
-                user_id INTEGER,
-                name TEXT,
-                status TEXT,
-                read_status INTEGER DEFAULT 0,
-                PRIMARY KEY(chat_id, user_id)
-            )
-        """)
-
-        await db_conn.commit()
-
-    return db_conn
+    await conn.commit()
+    return conn
 
 
 # =========================
-# FUNCTIONS (UNCHANGED LOGIC)
+# FUNCTIONS
 # =========================
 
 async def get_locked(chat_id):
@@ -86,6 +83,7 @@ async def get_locked(chat_id):
     ) as c:
         row = await c.fetchone()
 
+    await conn.close()
     return row[0] if row else 0
 
 
@@ -99,6 +97,8 @@ async def build(chat_id):
         (chat_id,)
     ) as c:
         data = await c.fetchall()
+
+    await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -125,7 +125,7 @@ async def build(chat_id):
 
 
 # =========================
-# MENU (UNCHANGED)
+# MENU
 # =========================
 
 def menu():
@@ -155,11 +155,9 @@ async def start(update, context):
 
 async def buttons(update, context):
     q = update.callback_query
-
-    # FIX: fast response (حل مشكلة الضغط مرتين)
     await q.answer(cache_time=0)
 
-    chat_id = q.message.chat_id
+    chat_id = q.message.chat.id
     user_id = q.from_user.id
     action = q.data
 
@@ -172,91 +170,3 @@ async def buttons(update, context):
                 "UPDATE users SET status='banned' WHERE chat_id=? AND user_id=?",
                 (chat_id, user_id)
             )
-        else:
-            if await get_locked(chat_id):
-                return
-
-            await conn.execute("""
-                INSERT OR REPLACE INTO users
-                (chat_id, user_id, name, status, read_status)
-                VALUES (?, ?, ?, ?, 0)
-            """, (
-                chat_id,
-                user_id,
-                q.from_user.full_name,
-                action
-            ))
-
-    elif action == "read":
-        await conn.execute("""
-            UPDATE users
-            SET read_status = CASE WHEN read_status=0 THEN 1 ELSE 0 END
-            WHERE chat_id=? AND user_id=?
-        """, (chat_id, user_id))
-
-    elif action == "remove":
-        await conn.execute(
-            "DELETE FROM users WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
-
-    elif action == "lock":
-        await conn.execute("""
-            UPDATE groups
-            SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END
-            WHERE chat_id=?
-        """, (chat_id,))
-
-    elif action == "reset":
-        await conn.execute(
-            "DELETE FROM users WHERE chat_id=?",
-            (chat_id,)
-        )
-
-    await conn.commit()
-
-    text = await build(chat_id)
-    await q.edit_message_text(text, reply_markup=menu())
-
-
-# =========================
-# REGISTER HANDLERS
-# =========================
-
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
-
-# =========================
-# WEBHOOK (FIXED FOR RENDER)
-# =========================
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-
-    async def process():
-        await init_bot()
-        update = Update.de_json(data, bot_app.bot)
-        await bot_app.process_update(update)
-
-    # FIX: avoid asyncio.run crash on Render
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(process())
-
-    return "ok", 200
-
-
-@app.route("/")
-def home():
-    return "Bot is active", 200
-
-
-# =========================
-# RUN
-# =========================
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
