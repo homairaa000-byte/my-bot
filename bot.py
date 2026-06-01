@@ -93,6 +93,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
@@ -116,8 +117,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
     await conn.commit()
+    # جلب النص المحدث فوراً قبل إغلاق الاتصال بقاعدة البيانات
+    new_text = await build(chat_id)
     await conn.close()
-    await q.edit_message_text(await build(chat_id), reply_markup=menu())
+    
+    # تحديث الواجهة فوراً
+    await q.edit_message_text(text=new_text, reply_markup=menu())
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
@@ -127,8 +132,6 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # =========================
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام asyncio.run للتعامل مع كل طلب بشكل منفصل ومستقل
-    # هذا يحل مشكلة الـ Event Loop المغلق
     async def process():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
