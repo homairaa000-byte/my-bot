@@ -1,7 +1,6 @@
 import os
 import logging
 import asyncio
-import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -16,11 +15,10 @@ DB = "/tmp/bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- تهيئة Loop عالمية للتحكم في الربط ---
-# هذا الجزء يحمي البوت من الانهيار عند استقبال Webhook
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+# --- تهيئة البوت بدون Loop معقدة ---
+bot_app = Application.builder().token(TOKEN).build()
 
+# --- قاعدة البيانات ---
 def db(): return sqlite3.connect(DB, check_same_thread=False)
 
 def init():
@@ -29,7 +27,7 @@ def init():
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 init()
 
-# --- التنسيقات ---
+# --- التنسيقات (تنسيقك الأصلي) ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -70,40 +68,29 @@ async def buttons(update, context):
     await q.answer()
     chat_id, user_id = q.message.chat_id, q.from_user.id
     data = q.data
-    
     with db() as conn:
         if data in ["register", "listener", "excused"]:
             conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, data))
         elif data == "lock":
             conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
-        elif data == "remove": 
-            conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-        elif data == "reset":
-            conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-        elif data == "read":
-            conn.execute("UPDATE users SET read_status = 1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    
+        elif data == "remove": conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        elif data == "reset": conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        elif data == "read": conn.execute("UPDATE users SET read_status = 1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     await q.edit_message_text(build(chat_id), reply_markup=menu())
 
-bot_app = Application.builder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# --- المسار المصحح للعمل في Render ---
+# --- تشغيل البوت مع Flask ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    # استخدام thread-safe لجدولة المهمة في الحلقة العالمية
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    asyncio.run(bot_app.process_update(update))
     return "ok", 200
 
 @app.route('/')
 def index(): return "Bot is running", 200
 
-async def setup_bot():
-    await bot_app.initialize()
-    await bot_app.bot.set_webhook(WEBHOOK_URL)
-
-if __name__ == '__main__':
-    loop.run_until_complete(setup_bot())
-    app.run(host="0.0.0.0", port=PORT)
+# تهيئة البوت عند بدء التشغيل
+asyncio.run(bot_app.initialize())
+asyncio.run(bot_app.bot.set_webhook(WEBHOOK_URL))
