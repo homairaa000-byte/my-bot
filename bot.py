@@ -92,12 +92,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    # إضافة cache_time=0 يضمن تحديث الواجهة فوراً
     await q.answer(cache_time=0)
     
     chat_id = q.message.chat_id
     user_id = q.from_user.id
-    # استخدام first_name فقط للحصول على اسم نظيف
     user_name = q.from_user.first_name
     action = q.data
     conn = await get_db()
@@ -123,11 +121,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_text = await build(chat_id)
     await conn.close()
     
-    # تحديث الواجهة
     await q.edit_message_text(text=new_text, reply_markup=menu())
 
-# التعامل مع الأمر سواء كان مع معرف البوت أو بدونه
-bot_app.add_handler(CommandHandler(["start", "start@Handelakademytbot"], start))
+bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
