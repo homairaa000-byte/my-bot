@@ -32,22 +32,8 @@ flask_app = Flask(__name__)
 async def get_db():
     conn = await aiosqlite.connect(DB)
     await conn.execute("PRAGMA journal_mode=WAL;")
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS groups (
-            chat_id INTEGER PRIMARY KEY,
-            locked INTEGER DEFAULT 0
-        )
-    """)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            chat_id INTEGER,
-            user_id INTEGER,
-            name TEXT,
-            status TEXT,
-            read_status INTEGER DEFAULT 0,
-            PRIMARY KEY(chat_id, user_id)
-        )
-    """)
+    await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
+    await conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
     await conn.commit()
     return conn
 
@@ -91,14 +77,10 @@ async def build(chat_id):
 
 def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
-         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
-        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🚫 حظر", callback_data="ban"),
-         InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
-         InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
+        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
+        [InlineKeyboardButton("🚫 حظر", callback_data="ban"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
 # =========================
@@ -118,4 +100,36 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
+        else:
+            if await get_locked(chat_id):
+                await conn.close()
+                return
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
+    elif action == "read":
+        await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    elif action == "remove":
+        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    elif action == "lock":
+        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
+    elif action == "reset":
+        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+
+    await conn.commit()
+    await conn.close()
+    await q.edit_message_text(await build(chat_id), reply_markup=menu())
+
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(bot_app.initialize())
+loop.run_until_complete(bot_app.start())
+
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot_app.bot)
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    return "ok", 200
