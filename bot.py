@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -15,7 +16,7 @@ DB = "/tmp/bot.db"
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- تهيئة Loop ثابتة للعمل في Flask ---
+# --- تهيئة Loop عالمية للتحكم في الربط ---
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -26,9 +27,10 @@ def init():
     with db() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
+
 init()
 
-# --- دالة البناء والقائمة (بدون تغيير) ---
+# --- دالة البناء والقائمة (تنسيقك الأصلي بالكامل) ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -60,25 +62,38 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# --- إعداد البوت ---
-bot_app = Application.builder().token(TOKEN).event_loop(loop).build()
-bot_app.add_handler(CommandHandler("start", start := lambda u, c: u.message.reply_text(build(u.effective_chat.id), reply_markup=menu())))
-bot_app.add_handler(CallbackQueryHandler(buttons := lambda u, c: (
-    (lambda q: (
-        q.answer(),
-        (lambda chat_id, user_id, data: (
-            db().execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, data)) if data in ["register", "listener", "excused"] else None,
-            db().execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,)) if data == "lock" else None,
-            db().execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)) if data == "remove" else None
-        ))(q.message.chat_id, q.from_user.id, q.data),
-        q.edit_message_text(build(q.message.chat_id), reply_markup=menu())
-    ))(u.callback_query)
-)))
+# --- المعالجات (تنسيقك الأصلي بالكامل) ---
+async def start(update, context):
+    await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
 
-# --- المسار المصحح ---
+async def buttons(update, context):
+    q = update.callback_query
+    await q.answer()
+    chat_id, user_id = q.message.chat_id, q.from_user.id
+    data = q.data
+    
+    with db() as conn:
+        if data in ["register", "listener", "excused"]:
+            conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, data))
+        elif data == "lock":
+            conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
+        elif data == "remove": 
+            conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        elif data == "reset":
+            conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        elif data == "read":
+            conn.execute("UPDATE users SET read_status = 1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    
+    await q.edit_message_text(build(chat_id), reply_markup=menu())
+
+# --- إعداد البوت ---
+bot_app = Application.builder().token(TOKEN).build()
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+
+# --- المسار المصحح للعمل في Render ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام thread-safe لجدولة المهمة في الحلقة العالمية
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
@@ -89,9 +104,7 @@ def index(): return "Bot is running", 200
 async def setup_bot():
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    await bot_app.start()
 
 if __name__ == '__main__':
     loop.run_until_complete(setup_bot())
     app.run(host="0.0.0.0", port=PORT)
-
