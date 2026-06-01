@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO)
 # BOT
 # =========================
 
-app = Application.builder().token(TOKEN).build()
+bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
@@ -176,6 +176,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
-    update = Update.de_json(data, app.bot)
-    asyncio.get_event_loop().create_task(app.process_update(update))
+    update = Update.de_json(data, bot_app.bot)
+    loop = asyncio.get_event_loop()
+    loop.create_task(bot_app.process_update(update))
     return "ok", 200
