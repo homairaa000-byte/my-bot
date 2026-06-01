@@ -15,17 +15,12 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else None
 DB = "bot.db"
 
-if not TOKEN:
-    raise ValueError("BOT_TOKEN is missing")
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
 bot_app = Application.builder().token(TOKEN).build()
 
 # =====================================
-# Database (Async)
+# Database & Bot Startup
 # =====================================
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
@@ -106,31 +101,28 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "reset":
             await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
         await conn.commit()
-
+    
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =====================================
-# Webhook & Flask (Modified)
+# Webhook (Final Fix)
 # =====================================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    # تعديل: نستخدم create_task لعدم حظر الـ Webhook
-    asyncio.create_task(bot_app.process_update(update))
+    asyncio.run(bot_app.process_update(update))
     return "ok", 200
 
-@app.route("/")
-def home():
-    return "Bot is running", 200
-
-async def setup():
+# تهيئة البوت مرة واحدة فقط عند بدء التشغيل
+async def setup_bot():
     await init_db()
+    await bot_app.initialize()  # ضروري جداً
     if WEBHOOK_URL:
-        # تأكد من ضبط الـ Webhook عند بدء التشغيل
         await bot_app.bot.set_webhook(WEBHOOK_URL)
 
 if __name__ == "__main__":
-    asyncio.run(setup
+    asyncio.run(setup_bot())
+    app.run(host="0.0.0.0", port=PORT)
