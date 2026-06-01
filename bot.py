@@ -141,6 +141,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
+# تهيئة التطبيق عند بدء التشغيل
+loop = asyncio.get_event_loop()
+loop.run_until_complete(bot_app.initialize())
+
 # =========================
 # WEBHOOK
 # =========================
@@ -148,5 +152,7 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    asyncio.run(bot_app.process_update(update))
+    # استخدام loop الموجود مسبقاً
+    loop.create_task(bot_app.process_update(update))
     return "ok", 200
+
