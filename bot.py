@@ -2,6 +2,7 @@ import os
 import logging
 import sqlite3
 import asyncio
+import threading
 
 from flask import Flask, request
 from telegram import (
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # =====================================
-# Telegram Application
+# Telegram App
 # =====================================
 
 bot_app = Application.builder().token(TOKEN).build()
@@ -87,6 +88,7 @@ async def is_admin(chat_id, user_id):
     except Exception:
         return False
 
+
 def get_locked(chat_id):
     with db() as conn:
         conn.execute(
@@ -101,6 +103,10 @@ def get_locked(chat_id):
 
         return row[0] if row else 0
 
+# =====================================
+# UI
+# =====================================
+
 def build(chat_id):
     with db() as conn:
 
@@ -111,20 +117,13 @@ def build(chat_id):
 
         locked = get_locked(chat_id)
 
-        data = conn.execute(
-            """
+        data = conn.execute("""
             SELECT name,status,is_banned,read_status
             FROM users
             WHERE chat_id=?
-            """,
-            (chat_id,)
-        ).fetchall()
+        """, (chat_id,)).fetchall()
 
-    status_text = (
-        "🔒 التسجيل مغلق"
-        if locked else
-        "🔓 التسجيل مفتوح"
-    )
+    status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
 
     def section(status, banned=False):
         result = []
@@ -138,16 +137,12 @@ def build(chat_id):
                 mark = ""
                 if status == "register" and read_status == 1:
                     mark = " ✅"
-
                 result.append(f"{name}{mark}")
 
         if not result:
             return "لا يوجد"
 
-        return "\n".join(
-            f"{i+1}- {x}"
-            for i, x in enumerate(result)
-        )
+        return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result))
 
     return (
         "السلام عليكم ورحمة الله وبركاته\n\n"
@@ -156,11 +151,8 @@ def build(chat_id):
         "قائمة تسجيل الأدوار 📝\n\n"
 
         f"✍️ المسجلات:\n{section('register')}\n\n"
-
         f"⛔️ المعتذرات:\n{section('excused')}\n\n"
-
         f"🎧 المستمعات:\n{section('listener')}\n\n"
-
         f"🚫 المحظورات:\n{section('', banned=True)}\n\n"
 
         "وَلَّذِينَ جَاهَدُوا فِينَا "
@@ -171,40 +163,19 @@ def build(chat_id):
 def menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
-                "✅ قرأت",
-                callback_data="read"
-            ),
-            InlineKeyboardButton(
-                "✍️ سجل اسمي",
-                callback_data="register"
-            )
+            InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
         ],
         [
-            InlineKeyboardButton(
-                "🎧 مستمعة",
-                callback_data="listener"
-            ),
-            InlineKeyboardButton(
-                "⛔️ معتذرة",
-                callback_data="excused"
-            )
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+            InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
         ],
         [
-            InlineKeyboardButton(
-                "🧹 تصفير",
-                callback_data="reset"
-            ),
-            InlineKeyboardButton(
-                "🔒 قفل/فتح",
-                callback_data="lock"
-            )
+            InlineKeyboardButton("🧹 تصفير", callback_data="reset"),
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")
         ],
         [
-            InlineKeyboardButton(
-                "❌ حذف اسمي",
-                callback_data="remove"
-            )
+            InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
         ]
     ])
 
@@ -237,79 +208,54 @@ async def buttons(update: Update, context):
         if action in ["register", "listener", "excused"]:
 
             if locked:
-                await q.answer(
-                    "التسجيل مغلق حالياً",
-                    show_alert=True
-                )
+                await q.answer("التسجيل مغلق حالياً", show_alert=True)
                 return
 
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT OR REPLACE INTO users
                 (chat_id,user_id,name,status,read_status)
                 VALUES (?,?,?,?,0)
-                """,
-                (
-                    chat_id,
-                    user_id,
-                    q.from_user.full_name,
-                    action
-                )
-            )
+            """, (
+                chat_id,
+                user_id,
+                q.from_user.full_name,
+                action
+            ))
 
         elif action == "read":
 
-            conn.execute(
-                """
+            conn.execute("""
                 UPDATE users
                 SET read_status=1
                 WHERE chat_id=? AND user_id=?
-                """,
-                (chat_id, user_id)
-            )
+            """, (chat_id, user_id))
 
         elif action == "remove":
 
-            conn.execute(
-                """
+            conn.execute("""
                 DELETE FROM users
                 WHERE chat_id=? AND user_id=?
-                """,
-                (chat_id, user_id)
-            )
+            """, (chat_id, user_id))
 
         elif action == "lock":
 
             if not await is_admin(chat_id, user_id):
-                await q.answer(
-                    "هذا الزر للمشرفين فقط",
-                    show_alert=True
-                )
+                await q.answer("هذا الزر للمشرفين فقط", show_alert=True)
                 return
 
-            conn.execute(
-                """
+            conn.execute("""
                 UPDATE groups
-                SET locked =
-                CASE WHEN locked=0 THEN 1 ELSE 0 END
+                SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END
                 WHERE chat_id=?
-                """,
-                (chat_id,)
-            )
+            """, (chat_id,))
 
         elif action == "reset":
 
             if not await is_admin(chat_id, user_id):
-                await q.answer(
-                    "هذا الزر للمشرفين فقط",
-                    show_alert=True
-                )
+                await q.answer("هذا الزر للمشرفين فقط", show_alert=True)
                 return
 
-            conn.execute(
-                "DELETE FROM users WHERE chat_id=?",
-                (chat_id,)
-            )
+            conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
     try:
         await q.edit_message_text(
@@ -323,35 +269,36 @@ async def buttons(update: Update, context):
 # Handlers
 # =====================================
 
-bot_app.add_handler(
-    CommandHandler("start", start)
-)
-
-bot_app.add_handler(
-    CallbackQueryHandler(buttons)
-)
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =====================================
-# Webhook
+# Startup FIX (حل مشكلة event loop)
 # =====================================
 
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+_started = False
 
-async def startup():
+async def setup_bot():
     await bot_app.initialize()
     await bot_app.start()
 
     if WEBHOOK_URL:
-        await bot_app.bot.delete_webhook(
-            drop_pending_updates=True
-        )
+        await bot_app.bot.delete_webhook(drop_pending_updates=True)
+        await bot_app.bot.set_webhook(WEBHOOK_URL)
 
-        await bot_app.bot.set_webhook(
-            WEBHOOK_URL
-        )
 
-loop.run_until_complete(startup())
+def start_bot_once():
+    global _started
+    if not _started:
+        _started = True
+        asyncio.run(setup_bot())
+
+
+start_bot_once()
+
+# =====================================
+# Flask
+# =====================================
 
 @app.route("/")
 def home():
@@ -359,16 +306,13 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     try:
         update = Update.de_json(
             request.get_json(force=True),
             bot_app.bot
         )
 
-        loop.run_until_complete(
-            bot_app.process_update(update)
-        )
+        asyncio.run(bot_app.process_update(update))
 
         return "ok", 200
 
