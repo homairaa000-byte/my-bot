@@ -4,9 +4,9 @@ import asyncio
 import aiosqlite
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-# 1. الإعدادات
+# إعدادات
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", "10000"))
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
@@ -14,21 +14,16 @@ WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else None
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
+
+# تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
 
-# 2. تعريف الدوال أولاً (قاعدة البيانات والواجهة)
+# تعريف الدوال (قاعدة البيانات والواجهة)
 async def init_db():
     async with aiosqlite.connect(DB) as conn:
         await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT,
-            read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id)
-        )
-        """)
+        await conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
         await conn.commit()
 
 async def get_locked(chat_id):
@@ -46,7 +41,6 @@ async def build(chat_id):
             data = await cursor.fetchall()
     
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
-
     def section(status):
         result = [f"{name}{' ✅' if read_status == 1 else ''}" for name, st, read_status in data if st == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
@@ -57,7 +51,6 @@ async def build(chat_id):
         f"✍️ المسجلات:\n{section('register')}\n\n"
         f"⛔️ المعتذرات:\n{section('excused')}\n\n"
         f"🎧 المستمعات:\n{section('listener')}\n\n"
-        "وَلَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
     )
 
 def menu():
@@ -68,7 +61,6 @@ def menu():
         [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# 3. معالجات الأوامر
 async def start(update, context):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -79,48 +71,33 @@ async def buttons(update, context):
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
-
     async with aiosqlite.connect(DB) as conn:
-        locked = await get_locked(chat_id)
         if action in ["register", "listener", "excused"]:
-            if locked:
-                await q.answer("التسجيل مغلق حالياً", show_alert=True)
-                return
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", 
-                               (chat_id, user_id, q.from_user.full_name, action))
-        elif action == "read":
-            await conn.execute("UPDATE users SET read_status=1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-        elif action == "remove":
-            await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-        elif action == "lock":
-            await conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
-        elif action == "reset":
-            await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+            if await get_locked(chat_id): return
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", (chat_id, user_id, q.from_user.full_name, action))
+        elif action == "read": await conn.execute("UPDATE users SET read_status=1 WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        elif action == "remove": await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        elif action == "lock": await conn.execute("UPDATE groups SET locked = CASE WHEN locked=0 THEN 1 ELSE 0 END WHERE chat_id=?", (chat_id,))
+        elif action == "reset": await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
         await conn.commit()
-    
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# 4. الـ Webhook وتهيئة التشغيل (يتم وضعها في النهاية)
+# تهيئة الـ Webhook بدون التسبب في تعارض
+@app.before_first_request
+def setup_webhook():
+    asyncio.run(init_db())
+    asyncio.run(bot_app.initialize())
+    asyncio.run(bot_app.bot.set_webhook(WEBHOOK_URL))
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # معالجة التحديث باستخدام asyncio.run_coroutine_threadsafe لضمان توافقه مع Gunicorn
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    loop.create_task(bot_app.process_update(update))
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
-
-async def setup_bot():
-    await init_db()
-    await bot_app.initialize()
-    await bot_app.start()
-    if WEBHOOK_URL:
-        await bot_app.bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(setup_bot())
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
