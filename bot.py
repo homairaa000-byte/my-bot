@@ -24,7 +24,7 @@ def init():
         conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, is_banned INTEGER DEFAULT 0, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
 init()
 
-# --- دالة البناء (مع التنسيقات الأصلية) ---
+# --- التنسيقات الأصلية (كما طلبت) ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -48,7 +48,6 @@ def build(chat_id):
             f"🎧 المستمعات:\n{f('listener')}\n\n🚫 المحظورات:\n{f('', banned=True)}\n\n"
             f"وَلَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
-# --- القائمة (مع كافة الأزرار) ---
 def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
@@ -58,6 +57,7 @@ def menu():
     ])
 
 # --- إعداد البوت ---
+# هنا ننشئ تطبيق البوت بدون ربطه مسبقاً بـ Loop لضمان عدم حدوث تعارض
 bot_app = Application.builder().token(TOKEN).build()
 
 async def start(update, context):
@@ -86,20 +86,25 @@ async def buttons(update, context):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# --- المسارات ---
+# --- الـ Webhook (معدل للعمل باستقرار) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    loop = asyncio.get_event_loop()
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    # نستخدم حلقة الأحداث الخاصة بالبوت
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
 @app.route('/')
 def index(): return "Bot is running", 200
 
 if __name__ == '__main__':
+    # تهيئة الحلقة والبدء
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    bot_app.loop = loop
+    
     loop.run_until_complete(bot_app.initialize())
     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
+    
+    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
