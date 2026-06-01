@@ -33,6 +33,7 @@ app = Application.builder().token(TOKEN).build()
 
 async def get_db():
     conn = await aiosqlite.connect(DB)
+    await conn.execute("PRAGMA journal_mode=WAL;")  # يقلل مشاكل الـ lock
 
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS groups (
@@ -155,17 +156,16 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = await get_db()
 
     if action in ["register", "listener", "excused", "ban"]:
-
         if action == "ban":
-            await conn.execute(
-                "UPDATE users SET status='banned' WHERE chat_id=? AND user_id=?",
-                (chat_id, user_id)
-            )
+            await conn.execute("""
+                INSERT OR REPLACE INTO users
+                (chat_id, user_id, name, status, read_status)
+                VALUES (?, ?, ?, 'banned', 0)
+            """, (chat_id, user_id, q.from_user.full_name))
         else:
             if await get_locked(chat_id):
                 await conn.close()
                 return
-
             await conn.execute("""
                 INSERT OR REPLACE INTO users
                 (chat_id, user_id, name, status, read_status)
@@ -180,15 +180,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """, (chat_id, user_id))
 
     elif action == "remove":
-        await conn.execute(
-            "DELETE FROM users WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
+        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
 
     elif action == "lock":
         await conn.execute("""
             UPDATE groups
-            SET locked = CASE WHEN locked=1 THEN 0 ELSE 0 END
+            SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END
             WHERE chat_id=?
         """, (chat_id,))
 
@@ -197,7 +194,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await conn.commit()
     await conn.close()
-
     await q.edit_message_text(await build(chat_id), reply_markup=menu())
 
 
@@ -208,11 +204,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+    await app.run_polling()
 
-    print("BOT IS RUNNING (V5 NO FLASK)")
-
-    await app.updater.idle()
+    print("BOT IS RUNNING (V5 FIXED)")
 
 
 if __name__ == "__main__":
