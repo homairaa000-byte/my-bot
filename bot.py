@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -8,7 +9,8 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-# في Render استخدم مسار الملف في مجلد /tmp أو مجلد ثابت
+# الرابط الخاص بك على Render
+WEBHOOK_URL = f"https://your-app-name.onrender.com/{TOKEN}" 
 DB = "/tmp/bot.db" 
 
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +27,7 @@ def init():
 
 init()
 
-# --- دالة البناء (تم الاحتفاظ بالتنسيق) ---
+# --- دالة البناء ---
 def build(chat_id):
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, 0)", (chat_id,))
@@ -68,7 +70,6 @@ async def buttons(update, context):
     data = q.data
     
     with db() as conn:
-        # (منطق الأزرار كما هو مع الحفاظ على التنسيق)
         if data in ["register", "listener", "excused"]:
             conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, data))
         elif data == "lock":
@@ -85,7 +86,6 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    import asyncio
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
     asyncio.run(bot_app.process_update(update))
     return "ok", 200
@@ -93,8 +93,11 @@ def webhook():
 @app.route('/')
 def index(): return "Bot is running", 200
 
+async def setup_webhook():
+    await bot_app.bot.set_webhook(WEBHOOK_URL)
+
 if __name__ == '__main__':
-    # تحديث الـ Webhook عند التشغيل
-    url = f"https://your-app-name.onrender.com/{TOKEN}" # استبدل your-app-name باسم تطبيقك في Render
-    bot_app.bot.set_webhook(url)
+    # تهيئة الـ Webhook
+    asyncio.run(setup_webhook())
+    # تشغيل Flask
     app.run(host="0.0.0.0", port=PORT)
