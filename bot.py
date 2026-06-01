@@ -127,8 +127,12 @@ bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK
+# WEBHOOK & HEALTH CHECK
 # =========================
+@flask_app.route("/", methods=["GET", "HEAD"])
+def index():
+    return "Bot is running", 200
+
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     async def process():
