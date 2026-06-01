@@ -1,7 +1,7 @@
-flask
-python-telegram-bot
-gunicorn
-gevent
+flask==3.1.1
+python-telegram-bot==22.1
+gunicorn==23.0.0
+gevent==25.5.1
 
 
 
