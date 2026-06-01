@@ -10,7 +10,6 @@ import sqlite3
 # --- الإعدادات ---
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-# الرابط المحدث بناءً على طلبك
 WEBHOOK_URL = f"https://my-bot-nquv.onrender.com/webhook" 
 DB = "/tmp/bot.db" 
 
@@ -88,18 +87,21 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    # استخدام خيط (thread) لمنع تعليق الـ Event Loop
-    threading.Thread(target=lambda: asyncio.run(bot_app.process_update(update))).start()
+    # استخدام loop الموجود في الـ app
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
 @app.route('/')
 def index(): return "Bot is running", 200
 
-async def setup_webhook():
+async def setup_bot():
+    # الخطوة الحيوية المفقودة
+    await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"Webhook set to: {WEBHOOK_URL}")
+    await bot_app.start()
 
 if __name__ == '__main__':
-    # تهيئة الويب هوك ثم تشغيل خادم Flask
-    asyncio.run(setup_webhook())
+    # تهيئة كل شيء قبل التشغيل
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(setup_bot())
     app.run(host="0.0.0.0", port=PORT)
