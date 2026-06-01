@@ -1,11 +1,16 @@
 import os
-import logging
 import asyncio
 import aiosqlite
 from datetime import datetime
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+import logging
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes
+)
 
 # =========================
 # SETTINGS
@@ -15,22 +20,15 @@ TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
-app = Flask(__name__)
-
-bot = Bot(TOKEN)
-bot_app = Application.builder().token(TOKEN).build()
 
 # =========================
-# INIT (FIX 1)
+# BOT
 # =========================
 
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-loop.run_until_complete(bot_app.initialize())
+app = Application.builder().token(TOKEN).build()
 
 # =========================
-# DB (OPTIMIZED FIX 2)
+# DATABASE
 # =========================
 
 async def get_db():
@@ -59,7 +57,7 @@ async def get_db():
 
 
 # =========================
-# LOCK
+# BUILD MESSAGE
 # =========================
 
 async def get_locked(chat_id):
@@ -79,10 +77,6 @@ async def get_locked(chat_id):
     await conn.close()
     return row[0] if row else 0
 
-
-# =========================
-# BUILD MESSAGE
-# =========================
 
 async def build(chat_id):
     conn = await get_db()
@@ -122,7 +116,7 @@ async def build(chat_id):
 
 
 # =========================
-# MENU (UNCHANGED)
+# MENU
 # =========================
 
 def menu():
@@ -142,15 +136,15 @@ def menu():
 
 
 # =========================
-# HANDLERS (FIX 3: NO DOUBLE PRESS)
+# HANDLERS
 # =========================
 
-async def start(update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
 
-async def buttons(update, context):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
@@ -176,15 +170,9 @@ async def buttons(update, context):
                 INSERT OR REPLACE INTO users
                 (chat_id, user_id, name, status, read_status)
                 VALUES (?, ?, ?, ?, 0)
-            """, (
-                chat_id,
-                user_id,
-                q.from_user.full_name,
-                action
-            ))
+            """, (chat_id, user_id, q.from_user.full_name, action))
 
     elif action == "read":
-        # FIX 4: reset fully (no ghost state)
         await conn.execute("""
             UPDATE users
             SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END
@@ -200,7 +188,7 @@ async def buttons(update, context):
     elif action == "lock":
         await conn.execute("""
             UPDATE groups
-            SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END
+            SET locked = CASE WHEN locked=1 THEN 0 ELSE 0 END
             WHERE chat_id=?
         """, (chat_id,))
 
@@ -214,15 +202,18 @@ async def buttons(update, context):
 
 
 # =========================
-# REGISTER HANDLERS
+# MAIN FIX (IMPORTANT FOR RENDER)
 # =========================
 
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
+async def main():
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    print("BOT IS RUNNING (V5 NO FLASK)")
+
+    await app.updater.idle()
 
 
-# =========================
-# WEBHOOK (FIX 5: NO asyncio.run)
-# =========================
-
-@app.route("/webhook", methods=["POST"])
+if __name__ == "__main__":
+    asyncio.run(main())
