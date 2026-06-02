@@ -72,7 +72,7 @@ def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🚫 حظر", callback_data="ban"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
+        [InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
@@ -85,45 +85,121 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
+
     conn = await get_db()
 
-    # 1. الحماية والحظر
     if action in ["lock", "reset"]:
         if not await is_admin(update, context):
             await conn.close()
-            return await q.answer("❌ هذا الأمر خاص بالمشرفات فقط!", show_alert=True)
-        if action == "lock": await conn.execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
-        if action == "reset": await conn.execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
-    
-    else:
-        # فحص الحظر العام لكل الأفعال
-        async with conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)) as c:
-            row = await c.fetchone()
-            if row and row[0] == 'banned' and action != "ban":
-                await conn.close()
-                return await q.answer("أنتِ محظورة!", show_alert=True)
+            return await q.answer(
+                "❌ هذا الأمر خاص بالمشرفات فقط!",
+                show_alert=True
+            )
 
-        if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status) VALUES (?, ?, ?, 'banned')", (chat_id, user_id, q.from_user.first_name))
-        elif action in ["register", "listener", "excused"]:
-            async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
+        if action == "lock":
+            async with conn.execute(
+                "SELECT locked FROM groups WHERE chat_id=?",
+                (chat_id,)
+            ) as c:
                 row = await c.fetchone()
-                if row and row[0] == 1:
-                    await conn.close()
-                    return await q.answer("التسجيل مغلق!", show_alert=True)
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status) VALUES (?, ?, ?, ?)", (chat_id, user_id, q.from_user.first_name, action))
+
+            current = row[0] if row else 0
+
+            await conn.execute(
+                "UPDATE groups SET locked=? WHERE chat_id=?",
+                (0 if current else 1, chat_id)
+            )
+
+        elif action == "reset":
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id=? AND status!='banned'",
+                (chat_id,)
+            )
+
+    else:
+        async with conn.execute(
+            "SELECT status FROM users WHERE chat_id=? AND user_id=?",
+            (chat_id, user_id)
+        ) as c:
+            row = await c.fetchone()
+
+        if row and row[0] == "banned":
+            await conn.close()
+            return await q.answer(
+                "🚫 أنتِ محظورة!",
+                show_alert=True
+            )
+
+        if action in ["register", "listener", "excused"]:
+
+            async with conn.execute(
+                "SELECT locked FROM groups WHERE chat_id=?",
+                (chat_id,)
+            ) as c:
+                row = await c.fetchone()
+
+            if row and row[0] == 1:
+                await conn.close()
+                return await q.answer(
+                    "🔒 التسجيل مغلق!",
+                    show_alert=True
+                )
+
+            await conn.execute(
+                """
+                INSERT OR REPLACE INTO users
+                (chat_id,user_id,name,status,read_status)
+                VALUES (?,?,?,?,0)
+                """,
+                (
+                    chat_id,
+                    user_id,
+                    q.from_user.first_name,
+                    action
+                )
+            )
+
         elif action == "read":
-            await conn.execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+
+            await conn.execute("""
+            INSERT INTO users
+            (chat_id,user_id,name,status,read_status)
+            VALUES (?,?,?,?,1)
+            ON CONFLICT(chat_id,user_id)
+            DO UPDATE SET read_status =
+            CASE
+            WHEN read_status=1 THEN 0
+            ELSE 1
+            END
+            """,
+            (
+                chat_id,
+                user_id,
+                q.from_user.first_name,
+                "register"
+            ))
+
         elif action == "remove":
-            await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id=? AND user_id=?",
+                (chat_id, user_id)
+            )
 
     await conn.commit()
+
     new_text = await build(chat_id, conn)
+
     await conn.close()
-    await q.edit_message_text(text=new_text, reply_markup=menu())
+
+    await q.edit_message_text(
+        text=new_text,
+        reply_markup=menu()
+    )
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
@@ -136,7 +212,6 @@ def index(): return "Bot is running", 200
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام thread-safe loop لإرسال التحديث للمعالجة
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
