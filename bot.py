@@ -24,7 +24,7 @@ bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# FIX: Event Loop (SAFE VERSION)
+# FIX: Event Loop (STABLE VERSION)
 # =========================
 loop = asyncio.new_event_loop()
 
@@ -34,11 +34,14 @@ def run_loop():
 
 threading.Thread(target=run_loop, daemon=True).start()
 
-def init_bot():
-    asyncio.run_coroutine_threadsafe(bot_app.initialize(), loop).result()
-    asyncio.run_coroutine_threadsafe(bot_app.start(), loop).result()
+# تشغيل البوت داخل نفس الـ loop
+async def init_bot():
+    await bot_app.initialize()
+    await bot_app.start()
 
-init_bot()
+# تشغيل التهيئة بشكل آمن داخل thread loop
+asyncio.run_coroutine_threadsafe(init_bot(), loop).result()
+
 
 # =========================
 # DATABASE & HELPERS
@@ -46,34 +49,68 @@ init_bot()
 async def get_db():
     conn = await aiosqlite.connect(DB)
     await conn.execute("PRAGMA journal_mode=WAL;")
-    await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
-    await conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            chat_id INTEGER PRIMARY KEY,
+            locked INTEGER DEFAULT 0
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            chat_id INTEGER,
+            user_id INTEGER,
+            name TEXT,
+            status TEXT,
+            read_status INTEGER DEFAULT 0,
+            PRIMARY KEY(chat_id, user_id)
+        )
+    """)
     await conn.commit()
     return conn
 
+
 async def is_admin(update, context):
     try:
-        member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            update.effective_user.id
+        )
         return member.status in ['creator', 'administrator']
     except:
         return False
 
+
+# =========================
+# UI BUILDER
+# =========================
 async def build(chat_id, conn):
-    async with conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,)):
+    async with conn.execute(
+        "INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)",
+        (chat_id,)
+    ):
         pass
 
-    async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
+    async with conn.execute(
+        "SELECT locked FROM groups WHERE chat_id=?",
+        (chat_id,)
+    ) as c:
         row = await c.fetchone()
         locked = row[0] if row else 0
 
-    async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
+    async with conn.execute(
+        "SELECT name,status,read_status FROM users WHERE chat_id=?",
+        (chat_id,)
+    ) as c:
         data = await c.fetchall()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     def section(status):
-        result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
+        result = [
+            f"{name}{' ✅' if r == 1 else ''}"
+            for name, s, r in data if s == status
+        ]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
     return (
@@ -90,24 +127,32 @@ async def build(chat_id, conn):
         "\n\u200B"
     )
 
+
 def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
-        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
+         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
+        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
         [InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+         InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+
+# =========================
+# HANDLERS
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = await get_db()
     text = await build(update.effective_chat.id, conn)
     await conn.close()
     await update.message.reply_text(text, reply_markup=menu())
 
+
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
 
-    # FIX: حماية من انهيار loop
     try:
         await q.answer()
     except:
@@ -116,16 +161,22 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
+
     conn = await get_db()
 
+    # ================= ADMIN ACTIONS =================
     if action in ["lock", "reset"]:
         if not await is_admin(update, context):
             await conn.close()
             return await q.answer("❌ هذا الأمر خاص بالمشرفات فقط!", show_alert=True)
 
         if action == "lock":
-            async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
+            async with conn.execute(
+                "SELECT locked FROM groups WHERE chat_id=?",
+                (chat_id,)
+            ) as c:
                 row = await c.fetchone()
+
             current = row[0] if row else 0
             await conn.execute(
                 "UPDATE groups SET locked=? WHERE chat_id=?",
@@ -150,7 +201,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await q.answer("🚫 أنتِ محظورة!", show_alert=True)
 
         if action in ["register", "listener", "excused"]:
-            async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
+            async with conn.execute(
+                "SELECT locked FROM groups WHERE chat_id=?",
+                (chat_id,)
+            ) as c:
                 row = await c.fetchone()
 
             if row and row[0] == 1:
@@ -164,9 +218,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif action == "read":
             await conn.execute(
-                "INSERT INTO users (chat_id,user_id,name,status,read_status) "
-                "VALUES (?,?,?,?,1) "
-                "ON CONFLICT(chat_id,user_id) DO UPDATE SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END",
+                """
+                INSERT INTO users (chat_id,user_id,name,status,read_status)
+                VALUES (?,?,?,?,1)
+                ON CONFLICT(chat_id,user_id)
+                DO UPDATE SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END
+                """,
                 (chat_id, user_id, q.from_user.first_name, "register")
             )
 
@@ -177,6 +234,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
     await conn.commit()
+
     new_text = await build(chat_id, conn)
     await conn.close()
 
@@ -186,25 +244,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
 # =========================
-# WEBHOOK (FIXED SAFE)
+# REGISTER HANDLERS
 # =========================
-@flask_app.route("/", methods=["GET", "HEAD"])
-def index():
-    return "Bot is running", 200
-
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
-
-    # FIX: run safely inside event loop
-    asyncio.run_coroutine_threadsafe(
-        bot_app.process_update(update),
-        loop
-    )
-
-    return "ok", 200
+bot_app.add_handler(CommandHandler("start",
