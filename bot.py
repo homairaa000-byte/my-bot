@@ -23,7 +23,9 @@ logging.basicConfig(level=logging.INFO)
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
-# إنشاء حلقة تشغيل عالمية وإدارتها في Thread منفصل
+# =========================
+# FIX: Event Loop (SAFE VERSION)
+# =========================
 loop = asyncio.new_event_loop()
 
 def run_loop():
@@ -36,7 +38,6 @@ def init_bot():
     asyncio.run_coroutine_threadsafe(bot_app.initialize(), loop).result()
     asyncio.run_coroutine_threadsafe(bot_app.start(), loop).result()
 
-# تهيئة البوت
 init_bot()
 
 # =========================
@@ -54,16 +55,20 @@ async def is_admin(update, context):
     try:
         member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
         return member.status in ['creator', 'administrator']
-    except: return False
+    except:
+        return False
 
 async def build(chat_id, conn):
-    async with conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,)): pass
+    async with conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,)):
+        pass
+
     async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
         row = await c.fetchone()
-        locked = row[0]
+        locked = row[0] if row else 0
+
     async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
         data = await c.fetchall()
-    
+
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -101,7 +106,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+
+    # FIX: حماية من انهيار loop
+    try:
+        await q.answer()
+    except:
+        pass
+
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
@@ -111,16 +122,29 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_admin(update, context):
             await conn.close()
             return await q.answer("❌ هذا الأمر خاص بالمشرفات فقط!", show_alert=True)
+
         if action == "lock":
             async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
                 row = await c.fetchone()
             current = row[0] if row else 0
-            await conn.execute("UPDATE groups SET locked=? WHERE chat_id=?", (0 if current else 1, chat_id))
+            await conn.execute(
+                "UPDATE groups SET locked=? WHERE chat_id=?",
+                (0 if current else 1, chat_id)
+            )
+
         elif action == "reset":
-            await conn.execute("DELETE FROM users WHERE chat_id=? AND status!='banned'", (chat_id,))
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id=? AND status!='banned'",
+                (chat_id,)
+            )
+
     else:
-        async with conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)) as c:
+        async with conn.execute(
+            "SELECT status FROM users WHERE chat_id=? AND user_id=?",
+            (chat_id, user_id)
+        ) as c:
             row = await c.fetchone()
+
         if row and row[0] == "banned":
             await conn.close()
             return await q.answer("🚫 أنتِ محظورة!", show_alert=True)
@@ -128,43 +152,59 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action in ["register", "listener", "excused"]:
             async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
                 row = await c.fetchone()
+
             if row and row[0] == 1:
                 await conn.close()
                 return await q.answer("🔒 التسجيل مغلق!", show_alert=True)
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)", (chat_id, user_id, q.from_user.first_name, action))
+
+            await conn.execute(
+                "INSERT OR REPLACE INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,0)",
+                (chat_id, user_id, q.from_user.first_name, action)
+            )
+
         elif action == "read":
-            await conn.execute("INSERT INTO users (chat_id,user_id,name,status,read_status) VALUES (?,?,?,?,1) ON CONFLICT(chat_id,user_id) DO UPDATE SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END", (chat_id, user_id, q.from_user.first_name, "register"))
+            await conn.execute(
+                "INSERT INTO users (chat_id,user_id,name,status,read_status) "
+                "VALUES (?,?,?,?,1) "
+                "ON CONFLICT(chat_id,user_id) DO UPDATE SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END",
+                (chat_id, user_id, q.from_user.first_name, "register")
+            )
+
         elif action == "remove":
-            await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id=? AND user_id=?",
+                (chat_id, user_id)
+            )
 
     await conn.commit()
     new_text = await build(chat_id, conn)
     await conn.close()
-    await q.edit_message_text(text=new_text, reply_markup=menu())
+
+    try:
+        await q.edit_message_text(text=new_text, reply_markup=menu())
+    except:
+        pass
+
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK
+# WEBHOOK (FIXED SAFE)
 # =========================
 @flask_app.route("/", methods=["GET", "HEAD"])
-def index(): return "Bot is running", 200
+def index():
+    return "Bot is running", 200
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
 
-    future = asyncio.run_coroutine_threadsafe(
+    # FIX: run safely inside event loop
+    asyncio.run_coroutine_threadsafe(
         bot_app.process_update(update),
         loop
     )
-    
-    try:
-        future.result(timeout=10)
-    except Exception as e:
-        logging.error(f"Webhook error: {e}")
-        
-    return "ok", 200
 
+    return "ok", 200
