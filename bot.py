@@ -12,23 +12,14 @@ from telegram.ext import (
     ContextTypes
 )
 
-# =========================
-# SETTINGS
-# =========================
 TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
 
 logging.basicConfig(level=logging.INFO)
 
-# =========================
-# BOT & FLASK
-# =========================
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
-# =========================
-# DATABASE
-# =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
     await conn.execute("PRAGMA journal_mode=WAL;")
@@ -37,23 +28,19 @@ async def get_db():
     await conn.commit()
     return conn
 
-# =========================
-# BUILD MESSAGE
-# =========================
-async def get_locked(chat_id):
-    conn = await get_db()
-    await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
+# دالة التحقق من المشرفات
+async def is_admin(update, context):
+    try:
+        chat_member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        return chat_member.status in ['creator', 'administrator']
+    except: return False
+
+async def build(chat_id, conn):
     async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
         row = await c.fetchone()
-    await conn.close()
-    return row[0] if row else 0
-
-async def build(chat_id):
-    conn = await get_db()
-    locked = await get_locked(chat_id)
+        locked = row[0] if row else 0
     async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
         data = await c.fetchall()
-    await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -62,9 +49,6 @@ async def build(chat_id):
         result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
-    # إضافة حرف غير مرئي لضمان تحديث الرسالة فوراً في المجموعات
-    invisible_char = "\u200B"
-    
     return (
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
@@ -76,7 +60,7 @@ async def build(chat_id):
         f"🎧 المستمعات:\n{section('listener')}\n\n"
         f"🚫 المحظورات:\n{section('banned')}\n\n"
         "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
-        f"\n{invisible_char}"
+        "\n\u200B"
     )
 
 def menu():
@@ -87,72 +71,67 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# =========================
-# HANDLERS
-# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = await build(update.effective_chat.id)
+    conn = await get_db()
+    text = await build(update.effective_chat.id, conn)
+    await conn.close()
     await update.message.reply_text(text, reply_markup=menu())
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer(cache_time=0)
-    
+    await q.answer()
     chat_id = q.message.chat_id
     user_id = q.from_user.id
-    user_name = q.from_user.first_name
     action = q.data
     conn = await get_db()
 
-    if action in ["register", "listener", "excused", "ban"]:
-        if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, user_name))
-        else:
-            if await get_locked(chat_id):
+    # حماية الأوامر الحساسة
+    if action in ["lock", "reset"]:
+        if not await is_admin(update, context):
+            await conn.close()
+            return await q.answer("❌ هذا الأمر خاص بالمشرفات فقط!", show_alert=True)
+        if action == "lock": await conn.execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
+        if action == "reset": await conn.execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
+    
+    # التسجيل والحظر
+    elif action in ["register", "listener", "excused", "ban"]:
+        # منع المحظورات
+        async with conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)) as c:
+            row = await c.fetchone()
+            if row and row[0] == 'banned' and action != "ban":
                 await conn.close()
-                return
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, user_name, action))
-    elif action == "read":
-        await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    elif action == "remove":
-        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    elif action == "lock":
-        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
-    elif action == "reset":
-        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+                return await q.answer("أنتِ محظورة من التسجيل!", show_alert=True)
+        
+        if action == "ban":
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status) VALUES (?, ?, ?, 'banned')", (chat_id, user_id, q.from_user.first_name))
+        else:
+            async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
+                row = await c.fetchone()
+                if row and row[0] == 1:
+                    await conn.close()
+                    return await q.answer("التسجيل مغلق!", show_alert=True)
+            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status) VALUES (?, ?, ?, ?)", (chat_id, user_id, q.from_user.first_name, action))
+
+    elif action == "read": await conn.execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    elif action == "remove": await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
 
     await conn.commit()
-    new_text = await build(chat_id)
+    new_text = await build(chat_id, conn)
     await conn.close()
-    
     await q.edit_message_text(text=new_text, reply_markup=menu())
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
-# =========================
-# WEBHOOK & HEALTH CHECK
-# =========================
-@flask_app.route("/", methods=["GET", "HEAD"])
-def index():
-    return "Bot is running", 200
-
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام حلقة تشغيل جديدة لكل طلب لتجنب خطأ Event loop is closed
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
     async def process():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        if not bot_app.running:
-            await bot_app.initialize()
+        if not bot_app.running: await bot_app.initialize()
         await bot_app.process_update(update)
-
-    try:
-        loop.run_until_complete(process())
-    finally:
-        loop.close()
-        
+    try: loop.run_until_complete(process())
+    finally: loop.close()
     return "ok", 200
