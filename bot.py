@@ -129,17 +129,25 @@ bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK (STABLE LOOP)
+# WEBHOOK (STABLE)
 # =========================
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+@flask_app.route("/", methods=["GET", "HEAD"])
+def index(): return "Bot is running", 200
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
-    async def process():
-        if not bot_app.running: await bot_app.initialize()
-        await bot_app.process_update(update)
-    loop.create_task(process())
+    # استخدام thread-safe loop لإرسال التحديث للمعالجة
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot_app.bot)
+        
+        async def process():
+            if not bot_app.running: await bot_app.initialize()
+            await bot_app.process_update(update)
+        
+        loop.run_until_complete(process())
+    finally:
+        loop.close()
     return "ok", 200
