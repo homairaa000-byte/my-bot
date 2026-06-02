@@ -62,6 +62,9 @@ async def build(chat_id):
         result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
+    # إضافة حرف غير مرئي لضمان تحديث الرسالة فوراً في المجموعات
+    invisible_char = "\u200B"
+    
     return (
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
@@ -73,6 +76,7 @@ async def build(chat_id):
         f"🎧 المستمعات:\n{section('listener')}\n\n"
         f"🚫 المحظورات:\n{section('banned')}\n\n"
         "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
+        f"\n{invisible_char}"
     )
 
 def menu():
