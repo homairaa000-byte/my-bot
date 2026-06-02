@@ -139,6 +139,10 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
+    # استخدام حلقة تشغيل جديدة لكل طلب لتجنب خطأ Event loop is closed
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     async def process():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
@@ -146,5 +150,9 @@ def webhook():
             await bot_app.initialize()
         await bot_app.process_update(update)
 
-    asyncio.run(process())
+    try:
+        loop.run_until_complete(process())
+    finally:
+        loop.close()
+        
     return "ok", 200
