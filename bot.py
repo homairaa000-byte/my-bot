@@ -28,7 +28,7 @@ bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# EVENT LOOP FIX (STABLE FOR RENDER)
+# EVENT LOOP (STABLE FIX)
 # =========================
 loop = asyncio.new_event_loop()
 
@@ -50,6 +50,7 @@ asyncio.run_coroutine_threadsafe(init_bot(), loop).result()
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
+
     await conn.execute("PRAGMA journal_mode=WAL;")
 
     await conn.execute("""
@@ -164,7 +165,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# CALLBACKS
+# CALLBACKS (FIXED SAFE MODE)
 # =========================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -180,75 +181,80 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn = await get_db()
 
-    # ADMIN ACTIONS
-    if action in ["lock", "reset"]:
-        if not await is_admin(update, context):
-            await conn.close()
-            return await q.answer("❌ للمشرفات فقط", show_alert=True)
-
-        if action == "lock":
-            cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
-            row = await cur.fetchone()
-            locked = row[0] if row else 0
-
-            await conn.execute(
-                "UPDATE groups SET locked=? WHERE chat_id=?",
-                (0 if locked else 1, chat_id)
-            )
-
-        elif action == "reset":
-            await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-
-    else:
-        cur = await conn.execute(
-            "SELECT status FROM users WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
-        row = await cur.fetchone()
-
-        if row and row[0] == "banned":
-            await conn.close()
-            return await q.answer("🚫 محظور", show_alert=True)
-
-        if action in ["register", "listener", "excused"]:
-            cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
-            row = await cur.fetchone()
-
-            if row and row[0] == 1:
+    try:
+        # ADMIN ACTIONS
+        if action in ["lock", "reset"]:
+            if not await is_admin(update, context):
                 await conn.close()
-                return await q.answer("🔒 التسجيل مغلق", show_alert=True)
+                return await q.answer("❌ للمشرفات فقط", show_alert=True)
 
-            await conn.execute(
-                "INSERT OR REPLACE INTO users VALUES (?,?,?,?,0)",
-                (chat_id, user_id, q.from_user.first_name, action)
-            )
+            if action == "lock":
+                cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+                row = await cur.fetchone()
+                locked = row[0] if row else 0
 
-        elif action == "read":
-            await conn.execute("""
-                INSERT INTO users VALUES (?,?,?,?,1)
-                ON CONFLICT(chat_id,user_id)
-                DO UPDATE SET read_status=1-read_status
-            """, (chat_id, user_id, q.from_user.first_name, "register"))
+                await conn.execute(
+                    "UPDATE groups SET locked=? WHERE chat_id=?",
+                    (0 if locked else 1, chat_id)
+                )
 
-        elif action == "remove":
-            await conn.execute(
-                "DELETE FROM users WHERE chat_id=? AND user_id=?",
+            elif action == "reset":
+                await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+
+        else:
+            cur = await conn.execute(
+                "SELECT status FROM users WHERE chat_id=? AND user_id=?",
                 (chat_id, user_id)
             )
+            row = await cur.fetchone()
 
-    await conn.commit()
+            if row and row[0] == "banned":
+                await conn.close()
+                return await q.answer("🚫 محظور", show_alert=True)
 
-    new_text = await build(chat_id, conn)
-    await conn.close()
+            if action in ["register", "listener", "excused"]:
+                cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+                row = await cur.fetchone()
 
-    try:
-        await q.edit_message_text(new_text, reply_markup=menu())
-    except:
-        pass
+                if row and row[0] == 1:
+                    await conn.close()
+                    return await q.answer("🔒 التسجيل مغلق", show_alert=True)
+
+                await conn.execute(
+                    "INSERT OR REPLACE INTO users VALUES (?,?,?,?,0)",
+                    (chat_id, user_id, q.from_user.first_name, action)
+                )
+
+            elif action == "read":
+                await conn.execute("""
+                    INSERT INTO users VALUES (?,?,?,?,1)
+                    ON CONFLICT(chat_id,user_id)
+                    DO UPDATE SET read_status = 1 - read_status
+                """, (chat_id, user_id, q.from_user.first_name, "register"))
+
+            elif action == "remove":
+                await conn.execute(
+                    "DELETE FROM users WHERE chat_id=? AND user_id=?",
+                    (chat_id, user_id)
+                )
+
+        await conn.commit()
+
+        new_text = await build(chat_id, conn)
+        await conn.close()
+
+        try:
+            await q.edit_message_text(new_text, reply_markup=menu())
+        except:
+            pass
+
+    except Exception as e:
+        logging.error(f"Callback error: {e}")
+        await conn.close()
 
 
 # =========================
-# REGISTER HANDLERS (FIXED)
+# HANDLERS
 # =========================
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
@@ -264,12 +270,16 @@ def home():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot_app.bot)
 
-    asyncio.run_coroutine_threadsafe(
-        bot_app.process_update(update),
-        loop
-    )
+        asyncio.run_coroutine_threadsafe(
+            bot_app.process_update(update),
+            loop
+        )
+
+    except Exception as e:
+        logging.error(f"Webhook error: {e}")
 
     return "ok", 200
