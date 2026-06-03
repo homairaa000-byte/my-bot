@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 # =========================
 # BOT & FLASK
 # =========================
-# نستخدم application بدون بدء polling
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
@@ -133,14 +132,12 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # التحقق من أن الطلب يحتوي على بيانات
     if not request.get_json():
         return "Bad Request", 400
         
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
     
-    # تشغيل المعالجة في الخلفية
     try:
         asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     except Exception as e:
@@ -148,7 +145,6 @@ def webhook():
         
     return "ok", 200
 
-# تأكد من إضافة هذه الخطوة لتهيئة البوت عند تشغيل السكريبت
 if __name__ == "__main__":
     asyncio.run(bot_app.initialize())
 
