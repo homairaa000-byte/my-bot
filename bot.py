@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 import logging
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # =========================
@@ -20,8 +20,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
-# متغير عالمي لتخزين الحلقة
 main_loop = None
+
+# =========================
+# HELPER: Check Admin
+# =========================
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    try:
+        member = await context.bot.get_chat_member(chat_id, user_id)
+        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
+    except:
+        return False
 
 # =========================
 # DATABASE & BUILD
@@ -74,8 +85,8 @@ def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ قرأت", callback_data="read"), InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
         [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"), InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🚫 حظر", callback_data="ban"), InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")],
+        [InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")]
     ])
 
 # =========================
@@ -85,6 +96,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context): return
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message.from_user
+        conn = await get_db()
+        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (update.effective_chat.id, target.id, target.full_name))
+        await conn.commit()
+        await conn.close()
+        await update.message.reply_text(f"تم حظر {target.full_name} ومنعها من التسجيل.")
+
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context): return
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message.from_user
+        conn = await get_db()
+        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (update.effective_chat.id, target.id))
+        await conn.commit()
+        await conn.close()
+        await update.message.reply_text(f"تم فك الحظر عن {target.full_name}")
+
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -93,32 +124,38 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = q.data
     conn = await get_db()
     
-    if action in ["register", "listener", "excused", "ban"]:
-        if action == "ban":
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
-        else:
-            if await get_locked(chat_id):
-                await conn.close()
-                return
-            await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
+    async with conn.execute("SELECT status FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id)) as c:
+        status_row = await c.fetchone()
+    
+    if status_row and status_row[0] == 'banned':
+        await conn.close()
+        return
+
+    if action in ["register", "listener", "excused"]:
+        if await get_locked(chat_id):
+            await conn.close()
+            return
+        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
     elif action == "read":
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
         await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "lock":
-        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
+        if await is_admin(update, context):
+            await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
     elif action == "reset":
-        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        if await is_admin(update, context):
+            await conn.execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
     
     await conn.commit()
     new_text = await build(chat_id)
     await conn.close()
-    try:
-        await q.edit_message_text(text=new_text, reply_markup=menu())
-    except Exception as e:
-        logging.error(f"Error: {e}")
+    try: await q.edit_message_text(text=new_text, reply_markup=menu())
+    except: pass
 
 bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CommandHandler("ban", ban_user))
+bot_app.add_handler(CommandHandler("unban", unban_user))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
@@ -128,7 +165,6 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    # استخدام الحلقة المخزنة عالمياً
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), main_loop)
     return "ok", 200
 
@@ -137,16 +173,10 @@ async def run_bot():
     main_loop = asyncio.get_running_loop()
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    
-    # تشغيل Flask في خيط منفصل
     def run_flask():
         flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), use_reloader=False)
-    
     threading.Thread(target=run_flask, daemon=True).start()
-    
-    # إبقاء البوت معلقاً في حلقة الأبدية
     await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
-
