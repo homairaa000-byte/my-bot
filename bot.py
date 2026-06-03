@@ -4,7 +4,7 @@ import aiosqlite
 from datetime import datetime
 import logging
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # =========================
@@ -12,6 +12,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
+WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -22,7 +23,7 @@ bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# DATABASE
+# DATABASE (تبقى كما هي)
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
@@ -41,7 +42,7 @@ async def get_locked(chat_id):
     return row[0] if row else 0
 
 # =========================
-# BUILD MESSAGE
+# BUILD MESSAGE & HANDLERS (تبقى كما هي)
 # =========================
 async def build(chat_id):
     conn = await get_db()
@@ -78,9 +79,6 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# =========================
-# HANDLERS
-# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -88,12 +86,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
     conn = await get_db()
-
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
             await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
@@ -110,11 +106,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
     elif action == "reset":
         await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-
     await conn.commit()
     new_text = await build(chat_id)
     await conn.close()
-    
     try:
         await q.edit_message_text(text=new_text, reply_markup=menu())
     except Exception as e:
@@ -124,7 +118,7 @@ bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK
+# WEBHOOK SETUP
 # =========================
 @flask_app.route("/", methods=["GET"])
 def index():
@@ -132,19 +126,19 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    if not request.get_json():
-        return "Bad Request", 400
-        
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    
-    try:
-        asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
-    except Exception as e:
-        logging.error(f"Error in webhook: {e}")
-        
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
 
+async def set_webhook():
+    bot = Bot(TOKEN)
+    await bot.set_webhook(url=WEBHOOK_URL)
+    logging.info(f"Webhook set to {WEBHOOK_URL}")
+
 if __name__ == "__main__":
-    asyncio.run(bot_app.initialize())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(bot_app.initialize())
+    loop.run_until_complete(set_webhook())
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
