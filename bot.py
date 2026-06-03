@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 # BOT & FLASK
 # =========================
-# نستخدم application جاهزة بدون البدء التلقائي (RunPolling)
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
@@ -52,7 +51,8 @@ async def build(chat_id):
     await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # تعديل: إضافة الثواني لضمان تغير الوقت في كل ضغطة
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def section(status):
         result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
@@ -90,6 +90,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     
+    # إضافة سطر تتبع (Debug) يظهر في السجلات عند الضغط
+    logging.info(f"DEBUG: Action detected: {q.data} from {q.from_user.full_name}")
+    
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
@@ -115,13 +118,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await conn.commit()
     new_text = await build(chat_id)
     await conn.close()
-    await q.edit_message_text(text=new_text, reply_markup=menu())
+    
+    try:
+        await q.edit_message_text(text=new_text, reply_markup=menu())
+    except Exception as e:
+        logging.error(f"Error editing message: {e}")
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK (MODIFIED FOR STABILITY)
+# WEBHOOK
 # =========================
 @flask_app.route("/", methods=["GET"])
 def index():
@@ -129,7 +136,6 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام loop الموجود بالفعل بدلاً من إنشاء جديد
     loop = asyncio.get_event_loop()
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
