@@ -19,11 +19,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 # =========================
 # BOT & FLASK
 # =========================
-bot_app = Application.builder().token(TOKEN).build()
+# نستخدم حلقة حدث مشتركة
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+bot_app = Application.builder().token(TOKEN).event_loop(loop).build()
 flask_app = Flask(__name__)
 
 # =========================
-# DATABASE
+# DATABASE (مُحسنة لضمان الإغلاق)
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
@@ -36,13 +40,14 @@ async def get_db():
 async def get_locked(chat_id):
     conn = await get_db()
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
+    await conn.commit()
     async with conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,)) as c:
         row = await c.fetchone()
     await conn.close()
     return row[0] if row else 0
 
 # =========================
-# BUILD MESSAGE
+# BUILD & HANDLERS
 # =========================
 async def build(chat_id):
     conn = await get_db()
@@ -50,14 +55,11 @@ async def build(chat_id):
     async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
         data = await c.fetchall()
     await conn.close()
-
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     def section(status):
         result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
-
     return (
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
@@ -79,9 +81,6 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
-# =========================
-# HANDLERS
-# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -115,35 +114,22 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await q.edit_message_text(text=new_text, reply_markup=menu())
     except Exception as e:
-        logging.error(f"Error editing message: {e}")
+        logging.error(f"Error: {e}")
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK SETUP
+# WEBHOOK & RUN
 # =========================
-@flask_app.route("/", methods=["GET"])
-def index():
-    return "Bot is running", 200
-
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    logging.info("RECEIVED A POST REQUEST AT WEBHOOK!")
-    data = request.get_json(force=True, silent=True)
-    if not data: return "ok", 200
-    update = Update.de_json(data, bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
 
-async def set_webhook():
-    bot = Bot(TOKEN)
-    await bot.set_webhook(url=WEBHOOK_URL)
-    logging.info(f"Webhook set to {WEBHOOK_URL}")
-
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
     loop.run_until_complete(bot_app.initialize())
-    loop.run_until_complete(set_webhook())
+    loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
