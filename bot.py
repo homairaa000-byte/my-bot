@@ -23,7 +23,7 @@ bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# DATABASE (تبقى كما هي)
+# DATABASE
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
@@ -42,7 +42,7 @@ async def get_locked(chat_id):
     return row[0] if row else 0
 
 # =========================
-# BUILD MESSAGE & HANDLERS (تبقى كما هي)
+# BUILD MESSAGE
 # =========================
 async def build(chat_id):
     conn = await get_db()
@@ -79,6 +79,9 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+# =========================
+# HANDLERS
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -126,7 +129,9 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True)
+    logging.info("RECEIVED A POST REQUEST AT WEBHOOK!")
+    data = request.get_json(force=True, silent=True)
+    if not data: return "ok", 200
     update = Update.de_json(data, bot_app.bot)
     asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
     return "ok", 200
