@@ -13,11 +13,12 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # =========================
 # BOT & FLASK
 # =========================
+# نستخدم application بدون بدء polling
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
@@ -105,41 +106,5 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "read":
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
-        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-    elif action == "lock":
-        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
-    elif action == "reset":
-        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat
 
-    await conn.commit()
-    new_text = await build(chat_id)
-    await conn.close()
-    
-    try:
-        await q.edit_message_text(text=new_text, reply_markup=menu())
-    except Exception as e:
-        logging.error(f"Error editing message: {e}")
-
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
-# =========================
-# WEBHOOK
-# =========================
-@flask_app.route("/", methods=["GET"])
-def index():
-    return "Bot is running", 200
-
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
-    
-    try:
-        loop = asyncio.get_event_loop()
-        asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
-        logging.info("Update processed successfully")
-    except Exception as e:
-        logging.error(f"Error processing update: {e}", exc_info=True)
-        
-    return "ok", 200
