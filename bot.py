@@ -51,7 +51,6 @@ async def build(chat_id):
     await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
-    # تعديل: إضافة الثواني لضمان تغير الوقت في كل ضغطة
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def section(status):
@@ -89,9 +88,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    
-    # إضافة سطر تتبع (Debug) يظهر في السجلات عند الضغط
-    logging.info(f"DEBUG: Action detected: {q.data} from {q.from_user.full_name}")
     
     chat_id = q.message.chat_id
     user_id = q.from_user.id
@@ -136,10 +132,14 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    loop = asyncio.get_event_loop()
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
     
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    try:
+        loop = asyncio.get_event_loop()
+        asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+        logging.info("Update processed successfully")
+    except Exception as e:
+        logging.error(f"Error processing update: {e}", exc_info=True)
+        
     return "ok", 200
-
