@@ -1,6 +1,7 @@
 import os
 import asyncio
 import aiosqlite
+import threading
 from datetime import datetime
 import logging
 from flask import Flask, request
@@ -16,9 +17,11 @@ WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
+
+# متغير عالمي لتخزين الحلقة
+main_loop = None
 
 # =========================
 # DATABASE & BUILD
@@ -121,23 +124,28 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # =========================
 # WEBHOOK & RUN
 # =========================
-@flask_app.route("/", methods=["GET"])
-def index():
-    return "Bot is running", 200
-
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    # الإصلاح هنا: استخدام الدالة العامة لجلب الحلقة
-    loop = asyncio.get_event_loop()
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    # استخدام الحلقة المخزنة عالمياً
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), main_loop)
     return "ok", 200
 
 async def run_bot():
+    global main_loop
+    main_loop = asyncio.get_running_loop()
     await bot_app.initialize()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    
+    # تشغيل Flask في خيط منفصل
+    def run_flask():
+        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), use_reloader=False)
+    
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # إبقاء البوت معلقاً في حلقة الأبدية
+    await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
