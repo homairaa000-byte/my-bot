@@ -4,7 +4,7 @@ import aiosqlite
 from datetime import datetime
 import logging
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # =========================
@@ -16,12 +16,12 @@ WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# تهيئة البوت (تم استبدال التطبيق بمُنشئ متوافق)
+# تهيئة البوت
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# DATABASE
+# DATABASE & BUILD
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
@@ -40,9 +40,6 @@ async def get_locked(chat_id):
     await conn.close()
     return row[0] if row else 0
 
-# =========================
-# BUILD & HANDLERS
-# =========================
 async def build(chat_id):
     conn = await get_db()
     locked = await get_locked(chat_id)
@@ -78,6 +75,9 @@ def menu():
         [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"), InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
     ])
 
+# =========================
+# HANDLERS
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
@@ -110,7 +110,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await conn.commit()
     new_text = await build(chat_id)
     await conn.close()
-    
     try:
         await q.edit_message_text(text=new_text, reply_markup=menu())
     except Exception as e:
@@ -122,18 +121,24 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # =========================
 # WEBHOOK & RUN
 # =========================
+@flask_app.route("/", methods=["GET"])
+def index():
+    return "Bot is running", 200
+
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # الحل الجذري: استخدام الحلقة الموحدة
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
+    # الإصلاح هنا: استخدام الدالة العامة لجلب الحلقة
+    loop = asyncio.get_event_loop()
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
     return "ok", 200
 
-if __name__ == "__main__":
-    # التهيئة والتشغيل
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(bot_app.initialize())
-    loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
+async def run_bot():
+    await bot_app.initialize()
+    await bot_app.bot.set_webhook(WEBHOOK_URL)
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+if __name__ == "__main__":
+    asyncio.run(run_bot())
 
