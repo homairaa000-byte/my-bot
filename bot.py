@@ -96,6 +96,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "🤖 **تعليمات استخدام خادم القرآن الرقمي**\n\n"
+        "✨ **للعضوات:**\n"
+        "• استخدمي الأزرار أسفل الرسالة لتسجيل دورك:\n"
+        "  - ✅ **قرأت**: لتأكيد القراءة.\n"
+        "  - ✍️ **سجل اسمي**: لإضافة اسمك في قائمة المسجلات.\n"
+        "  - 🎧 **مستمعة**: إذا كنتِ ستستمعين فقط.\n"
+        "  - ⛔️ **معتذرة**: إذا كنتِ لا تستطيعين المشاركة اليوم.\n"
+        "  - ❌ **حذف اسمي**: لإزالة اسمك من القوائم.\n\n"
+        "👑 **للمشرفات فقط:**\n"
+        "• **القفل/الفتح**: من زر (🔒 قفل/فتح) في القائمة.\n"
+        "• **تصفير القائمة**: من زر (🧹 تصفير القائمة) لحذف جميع الأسماء.\n"
+        "• **حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/ban`\n"
+        "• **فك حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/unban`\n\n"
+        "⚠️ *ملاحظة: أوامر الحظر والتصفير والقفل تتطلب صلاحية مشرف في المجموعة.*"
+    )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context): return
     if update.message.reply_to_message:
@@ -154,6 +173,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
 bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CommandHandler("help", help_command))
 bot_app.add_handler(CommandHandler("ban", ban_user))
 bot_app.add_handler(CommandHandler("unban", unban_user))
 bot_app.add_handler(CallbackQueryHandler(buttons))
