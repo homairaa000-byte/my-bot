@@ -16,10 +16,7 @@ WEBHOOK_URL = "https://my-bot-nquv.onrender.com/webhook"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# =========================
-# BOT & FLASK
-# =========================
-# تم حذف تعريف الحلقة اليدوي لمنع التعارض
+# تهيئة البوت (تم استبدال التطبيق بمُنشئ متوافق)
 bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
@@ -52,11 +49,14 @@ async def build(chat_id):
     async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
         data = await c.fetchall()
     await conn.close()
+    
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     def section(status):
         result = [f"{name}{' ✅' if r == 1 else ''}" for name, s, r in data if s == status]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
+
     return (
         "السلام عليكم ورحمة الله وبركاته\n"
         f"📅 {date_str}\n\n"
@@ -89,6 +89,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = q.from_user.id
     action = q.data
     conn = await get_db()
+    
     if action in ["register", "listener", "excused", "ban"]:
         if action == "ban":
             await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (chat_id, user_id, q.from_user.full_name))
@@ -105,9 +106,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
     elif action == "reset":
         await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+    
     await conn.commit()
     new_text = await build(chat_id)
     await conn.close()
+    
     try:
         await q.edit_message_text(text=new_text, reply_markup=menu())
     except Exception as e:
@@ -121,14 +124,14 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # =========================
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    # استخدام asyncio.run للمعالجة الصحيحة
+    # الحل الجذري: استخدام الحلقة الموحدة
     data = request.get_json(force=True)
     update = Update.de_json(data, bot_app.bot)
-    asyncio.run(bot_app.process_update(update))
+    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), bot_app.loop)
     return "ok", 200
 
 if __name__ == "__main__":
-    # تشغيل التهيئة
+    # التهيئة والتشغيل
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot_app.initialize())
     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
