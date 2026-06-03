@@ -19,15 +19,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 # =========================
 # BOT & FLASK
 # =========================
-# نستخدم حلقة حدث مشتركة
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-bot_app = Application.builder().token(TOKEN).event_loop(loop).build()
+# تم حذف تعريف الحلقة اليدوي لمنع التعارض
+bot_app = Application.builder().token(TOKEN).build()
 flask_app = Flask(__name__)
 
 # =========================
-# DATABASE (مُحسنة لضمان الإغلاق)
+# DATABASE
 # =========================
 async def get_db():
     conn = await aiosqlite.connect(DB)
@@ -124,11 +121,15 @@ bot_app.add_handler(CallbackQueryHandler(buttons))
 # =========================
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(update), loop)
+    # استخدام asyncio.run للمعالجة الصحيحة
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot_app.bot)
+    asyncio.run(bot_app.process_update(update))
     return "ok", 200
 
 if __name__ == "__main__":
+    # تشغيل التهيئة
+    loop = asyncio.get_event_loop()
     loop.run_until_complete(bot_app.initialize())
     loop.run_until_complete(bot_app.bot.set_webhook(WEBHOOK_URL))
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
