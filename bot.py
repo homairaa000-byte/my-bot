@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
 DB = "bot.db"
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN is missing")
@@ -37,7 +37,9 @@ async def is_admin(update, context):
     try:
         member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
         return member.status in ["creator", "administrator"]
-    except: return False
+    except Exception as e:
+        logging.error(f"Admin check error: {e}")
+        return False
 
 async def build(chat_id, conn):
     await conn.execute("INSERT OR IGNORE INTO groups(chat_id, locked) VALUES (?,0)", (chat_id,))
@@ -80,7 +82,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if await is_admin(update, context):
                 if action == "lock":
                     cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
-                    l = (await cur.fetchone())[0]
+                    row = await cur.fetchone()
+                    l = row[0] if row else 0
                     await conn.execute("UPDATE groups SET locked=? WHERE chat_id=?", (0 if l else 1, chat_id))
                 else: await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
         elif action in ["register", "listener", "excused"]:
@@ -93,7 +96,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.commit()
         new_text = await build(chat_id, conn)
         await q.edit_message_text(new_text, reply_markup=menu())
-    finally: await conn.close()
+    except Exception as e:
+        logging.error(f"Callback processing error: {e}")
+    finally: 
+        await conn.close()
 
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(buttons))
@@ -106,6 +112,13 @@ def home(): return "Bot is running", 200
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    asyncio.run_coroutine_threadsafe(bot_app.process_update(Update.de_json(request.get_json(force=True), bot_app.bot)), asyncio.get_event_loop())
+    try:
+        data = request.get_json(force=True)
+        # هذا السطر سيطبع محتوى الطلب في سجلات Render لمساعدتك في التصحيح
+        logging.info(f"Webhook received: {data}") 
+        update = Update.de_json(data, bot_app.bot)
+        asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    except Exception as e:
+        logging.error(f"Webhook processing error: {e}")
     return "ok", 200
 
