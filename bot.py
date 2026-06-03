@@ -32,11 +32,9 @@ flask_app = Flask(__name__)
 loop = asyncio.get_event_loop()
 
 async def init_bot():
-    logging.info("Initializing bot application...")
     await bot_app.initialize()
     await bot_app.start()
     await bot_app.updater.start()
-    logging.info("Bot application started successfully.")
 
 loop.create_task(init_bot())
 
@@ -75,8 +73,7 @@ async def is_admin(update, context):
             update.effective_user.id
         )
         return member.status in ["creator", "administrator"]
-    except Exception as e:
-        logging.error(f"Admin check error: {e}", exc_info=True)
+    except:
         return False
 
 # =========================
@@ -145,7 +142,6 @@ def menu():
 # START
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.info(f"/start command received from chat_id={update.effective_chat.id}")
     conn = await get_db()
     text = await build(update.effective_chat.id, conn)
     await conn.close()
@@ -164,9 +160,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = q.message.chat_id
     user_id = q.from_user.id
     action = q.data
-    logging.info(f"Callback received: chat_id={chat_id}, user_id={user_id}, action={action}")
-
     conn = await get_db()
+
     try:
         if action in ["lock", "reset"]:
             if not await is_admin(update, context):
@@ -181,10 +176,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "UPDATE groups SET locked=? WHERE chat_id=?",
                     (0 if locked else 1, chat_id)
                 )
-                logging.info(f"Lock toggled for chat_id={chat_id}")
             elif action == "reset":
                 await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-                logging.info(f"Users reset for chat_id={chat_id}")
         else:
             cur = await conn.execute(
                 "SELECT status FROM users WHERE chat_id=? AND user_id=?",
@@ -196,4 +189,60 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return await q.answer("🚫 محظور", show_alert=True)
 
             if action in ["register", "listener", "excused"]:
-                cur = await conn.execute("SELECT
+                cur = await conn.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+                row = await cur.fetchone()
+                if row and row[0] == 1:
+                    await conn.close()
+                    return await q.answer("🔒 التسجيل مغلق", show_alert=True)
+                
+                await conn.execute(
+                    "INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,0)",
+                    (chat_id, user_id, q.from_user.first_name, action)
+                )
+            elif action == "read":
+                await conn.execute("""
+                    INSERT INTO users (chat_id, user_id, name, status, read_status) 
+                    VALUES (?,?,?,?,1)
+                    ON CONFLICT(chat_id,user_id)
+                    DO UPDATE SET read_status = 1 - read_status
+                """, (chat_id, user_id, q.from_user.first_name, "register"))
+            elif action == "remove":
+                await conn.execute(
+                    "DELETE FROM users WHERE chat_id=? AND user_id=?",
+                    (chat_id, user_id)
+                )
+
+        await conn.commit()
+        new_text = await build(chat_id, conn)
+        await conn.close()
+        try:
+            await q.edit_message_text(new_text, reply_markup=menu())
+        except:
+            pass
+    except Exception as e:
+        logging.error(f"Callback error: {e}")
+        await conn.close()
+
+# =========================
+# HANDLERS
+# =========================
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+
+# =========================
+# FLASK
+# =========================
+@flask_app.route("/", methods=["GET"])
+def home():
+    return "Bot is running", 200
+
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot_app.bot)
+        loop.create_task(bot_app.process_update(update))
+    except Exception as e:
+        logging.error(f"Webhook error: {e}")
+    return "ok", 200
+
