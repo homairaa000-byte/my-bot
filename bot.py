@@ -106,5 +106,49 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "read":
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
-        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat
+        await conn.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+    elif action == "lock":
+        await conn.execute("UPDATE groups SET locked = CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE chat_id=?", (chat_id,))
+    elif action == "reset":
+        await conn.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+
+    await conn.commit()
+    new_text = await build(chat_id)
+    await conn.close()
+    
+    try:
+        await q.edit_message_text(text=new_text, reply_markup=menu())
+    except Exception as e:
+        logging.error(f"Error editing message: {e}")
+
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+
+# =========================
+# WEBHOOK
+# =========================
+@flask_app.route("/", methods=["GET"])
+def index():
+    return "Bot is running", 200
+
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    # التحقق من أن الطلب يحتوي على بيانات
+    if not request.get_json():
+        return "Bad Request", 400
+        
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot_app.bot)
+    
+    # تشغيل المعالجة في الخلفية
+    try:
+        asyncio.run_coroutine_threadsafe(bot_app.process_update(update), asyncio.get_event_loop())
+    except Exception as e:
+        logging.error(f"Error in webhook: {e}")
+        
+    return "ok", 200
+
+# تأكد من إضافة هذه الخطوة لتهيئة البوت عند تشغيل السكريبت
+if __name__ == "__main__":
+    asyncio.run(bot_app.initialize())
 
