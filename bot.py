@@ -93,6 +93,10 @@ def menu():
 # HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # حماية أمر البدء ليقتصر على المشرفات فقط
+    if not await is_admin(update, context):
+        return
+    
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
@@ -107,6 +111,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  - ⛔️ **معتذرة**: إذا كنتِ لا تستطيعين المشاركة اليوم.\n"
         "  - ❌ **حذف اسمي**: لإزالة اسمك من القوائم.\n\n"
         "👑 **للمشرفات فقط:**\n"
+        "• **تشغيل البوت**: `/start`\n"
         "• **القفل/الفتح**: من زر (🔒 قفل/فتح) في القائمة.\n"
         "• **تصفير القائمة**: من زر (🧹 تصفير القائمة) لحذف جميع الأسماء.\n"
         "• **حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/ban`\n"
