@@ -41,7 +41,18 @@ async def get_db():
     conn = await aiosqlite.connect(DB)
     await conn.execute("PRAGMA journal_mode=WAL;")
     await conn.execute("CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)")
-    await conn.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status INTEGER DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
+    # إضافة عمود created_at لتسجيل وقت الانضمام لكل حالة
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            chat_id INTEGER, 
+            user_id INTEGER, 
+            name TEXT, 
+            status TEXT, 
+            read_status INTEGER DEFAULT 0, 
+            created_at TIMESTAMP,
+            PRIMARY KEY(chat_id, user_id)
+        )
+    """)
     await conn.commit()
     return conn
 
@@ -57,7 +68,8 @@ async def get_locked(chat_id):
 async def build(chat_id):
     conn = await get_db()
     locked = await get_locked(chat_id)
-    async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,)) as c:
+    # جلب البيانات مرتبة حسب وقت التسجيل (الأقدم أولاً)
+    async with conn.execute("SELECT name,status,read_status FROM users WHERE chat_id=? ORDER BY created_at ASC", (chat_id,)) as c:
         data = await c.fetchall()
     await conn.close()
     
@@ -93,10 +105,7 @@ def menu():
 # HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # حماية أمر البدء ليقتصر على المشرفات فقط
-    if not await is_admin(update, context):
-        return
-    
+    if not await is_admin(update, context): return
     text = await build(update.effective_chat.id)
     await update.message.reply_text(text, reply_markup=menu())
 
@@ -115,8 +124,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• **القفل/الفتح**: من زر (🔒 قفل/فتح) في القائمة.\n"
         "• **تصفير القائمة**: من زر (🧹 تصفير القائمة) لحذف جميع الأسماء.\n"
         "• **حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/ban`\n"
-        "• **فك حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/unban`\n\n"
-        "⚠️ *ملاحظة: أوامر الحظر والتصفير والقفل تتطلب صلاحية مشرف في المجموعة.*"
+        "• **فك حظر عضوة**: بالرد على رسالة العضوة في المجموعة بالأمر: `/unban`"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -125,10 +133,12 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         target = update.message.reply_to_message.from_user
         conn = await get_db()
-        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, 'banned', 0)", (update.effective_chat.id, target.id, target.full_name))
+        # إضافة التاريخ عند الحظر لترتيب المحظورات
+        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status, created_at) VALUES (?, ?, ?, 'banned', 0, ?)", 
+                           (update.effective_chat.id, target.id, target.full_name, datetime.now()))
         await conn.commit()
         await conn.close()
-        await update.message.reply_text(f"تم حظر {target.full_name} ومنعها من التسجيل.")
+        await update.message.reply_text(f"تم حظر {target.full_name}")
 
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context): return
@@ -155,11 +165,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await conn.close()
         return
 
+    # عند اختيار حالة، يتم تحديث الوقت الحالي لضمان الترتيب التلقائي في القائمة
     if action in ["register", "listener", "excused"]:
         if await get_locked(chat_id):
             await conn.close()
             return
-        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?, ?, ?, ?, 0)", (chat_id, user_id, q.from_user.full_name, action))
+        await conn.execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status, created_at) VALUES (?, ?, ?, ?, 0, ?)", 
+                           (chat_id, user_id, q.from_user.full_name, action, datetime.now()))
     elif action == "read":
         await conn.execute("UPDATE users SET read_status = CASE WHEN read_status=1 THEN 0 ELSE 1 END WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
@@ -205,3 +217,4 @@ async def run_bot():
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
+
