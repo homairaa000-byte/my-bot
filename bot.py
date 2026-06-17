@@ -4,22 +4,18 @@ import asyncpg
 import threading
 from datetime import datetime
 import logging
-from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # =========================
 # SETTINGS
 # =========================
+# يتم جلب التوكن من متغيرات البيئة في تيرموكس
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = "https://my-bot.koyeb.app/webhook"  # رابط Koyeb الجديد
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 bot_app = Application.builder().token(TOKEN).build()
-flask_app = Flask(__name__)
-
-main_loop = None
 
 # =========================
 # HELPER: Check Admin
@@ -37,6 +33,7 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # DATABASE & BUILD
 # =========================
 async def get_db():
+    # تأكدي من ضبط DATABASE_URL في تيرموكس عبر أمر export
     conn = await asyncpg.connect(os.getenv("DATABASE_URL"))
     return conn
 
@@ -173,4 +170,8 @@ bot_app.add_handler(CommandHandler("unban", unban_user))
 bot_app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEB
+# RUNNING
+# =========================
+if __name__ == "__main__":
+    print("البوت يعمل الآن بنظام Polling...")
+    bot_app.run_polling()
