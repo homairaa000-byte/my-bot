@@ -1,71 +1,50 @@
-import os
 import asyncio
+from flask import Flask, request
+
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# =========================
-# CONFIG
-# =========================
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.environ.get("PORT", 10000))
+from config import TOKEN, WEBHOOK_URL
+from database import init_db, add_user
+
+app = Flask(__name__)
+
+# ===== Bot Application =====
+bot_app = Application.builder().token(TOKEN).build()
 
 
-# =========================
-# BOT CORE
-# =========================
-app = Application.builder().token(TOKEN).build()
-
-
-# =========================
-# COMMANDS
-# =========================
+# ===== /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🚀 البوت يعمل بنجاح على Webhook (V5 احترافي)\n"
-        "📡 جاهز للاستضافة على Render"
-    )
+    user_id = update.effective_user.id
+    await add_user(user_id)
+
+    await update.message.reply_text("👋 أهلاً بك! البوت يعمل بنجاح 🚀")
 
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📌 الأوامر المتاحة:\n"
-        "/start - تشغيل البوت\n"
-        "/help - المساعدة"
-    )
+bot_app.add_handler(CommandHandler("start", start))
 
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("help", help_cmd))
+# ===== Webhook Route =====
+@app.post(f"/{TOKEN}")
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    bot_app.process_update(update)
+    return "ok"
 
 
-# =========================
-# WEBHOOK SETUP
-# =========================
-async def post_init(application: Application):
-    await application.bot.set_webhook(WEBHOOK_URL)
+# ===== تشغيل البوت =====
+async def run():
+    await init_db()
 
+    await bot_app.initialize()
+    await bot_app.start()
 
-app.post_init = post_init
+    await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
 
+    print("🚀 Bot is running with Webhook")
 
-# =========================
-# RUN SERVER
-# =========================
-def main():
-    print("🚀 Bot V5 Webhook is running...")
-
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=WEBHOOK_URL,
-        drop_pending_updates=True
-    )
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run())
