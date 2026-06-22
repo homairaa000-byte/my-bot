@@ -1,4 +1,2 @@
 python-telegram-bot==22.1
 aiohttp
-python-dotenv
-aiosqlite
