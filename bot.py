@@ -9,10 +9,7 @@ from telegram.ext import (
 
 from handlers.start import start
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -20,7 +17,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    # ربط /start
     app.add_handler(CommandHandler("start", start))
 
     print("Bot is running...")
