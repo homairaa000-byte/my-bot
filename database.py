@@ -1,17 +1,13 @@
 import aiosqlite
 
-DB_NAME = "bot.db"
+DB = "bot.db"
 
 async def init_db():
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with aiosqlite.connect(DB) as db:
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER UNIQUE
         )
         """)
-        await db.commit()
-
-async def add_user(user_id: int):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         await db.commit()
