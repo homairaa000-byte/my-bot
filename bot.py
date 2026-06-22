@@ -1,16 +1,11 @@
 import os
-import sqlite3
+import telebot
 import threading
 import time
-import re
-import schedule
-import logging
-from datetime import datetime
 from flask import Flask, request
-import telebot
 
 # =========================
-# SETTINGS
+# الإعدادات
 # =========================
 
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -19,44 +14,8 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-logging.basicConfig(level=logging.INFO)
-
 # =========================
-# DATABASE (SQLite)
-# =========================
-
-DB = "bot.db"
-
-def init_db():
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        chat_id INTEGER,
-        user_id INTEGER,
-        name TEXT,
-        status TEXT,
-        read_status INTEGER DEFAULT 0,
-        created_at TEXT,
-        PRIMARY KEY (chat_id, user_id)
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS groups (
-        chat_id INTEGER PRIMARY KEY,
-        locked INTEGER DEFAULT 0
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =========================
-# النصوص (كما هي 100%)
+# النصوص (بدون أي حذف)
 # =========================
 
 WARNING_MESSAGE = "عذراً أختي الكريمة، الأكاديمية مخصصة للنساء فقط، يرجى التأكد من أن الاسم صريح وواضح (بدون رموز أو حرف واحد)."
@@ -69,8 +28,11 @@ WELCOME_MESSAGE = """
 يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
 """
 
-SCHEDULE_TEXT = """
-" ✍جدول حلقات المقرأة♕
+# =========================
+# 📚 الجدول (كامل)
+# =========================
+
+SCHEDULE_TEXT = """(" ✍جدول حلقات المقرأة♕
 
 ꧁꧁꧁꧁꧂꧂꧂꧂
 
@@ -109,7 +71,7 @@ SCHEDULE_TEXT = """
 💐 المعلمة : أميرة عزت 
 شرح احكام النون الساكنه والتنوين 
 📝 المشرفة : دنيا
-⏰ التوقيت : الاحد 3عصرا بتوقيت مكه 
+⏰ التوقيت : الاحد 11صباحا بتوقيت مكه 
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : مريم ياسين 
 📝 المشرفة : 
@@ -146,29 +108,35 @@ SCHEDULE_TEXT = """
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : زهراء 
 📝 المشرفة : اماني علي 
-📆 اليوم: السبت 
+📆   اليوم:  السبت 
 ⏰ التوقيت : 5 بتوقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : نسرين بركات 
 📝 المشرفة : ميمونة 
-📆 اليوم: السبت 
+📆   اليوم:  السبت 
 ⏰ التوقيت : 3 مساء بتوقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
 
-القرآن في الدنيا نافع🍃
-وفي القبر شافع🍃
-وفي الجنة رافع🍃
-اللهم اجعلنا من أهله وخاصته🤲🌹
-"""
 
-RULES_TEXT = """
-بسم الله الرحمن الرحيم 
+القرآن في الدنيا نافع🍃
+‏وفي القبر شافع🍃
+‏وفي الجنة رافع🍃
+‏اللهم اجعلنا من أهله وخاصته🤲🌹
+
+꧁꧁꧁꧁꧂꧂꧂꧂
+")"""
+
+# =========================
+# 📜 القوانين (كاملة)
+# =========================
+
+RULES_TEXT = """(بسم الله الرحمن الرحيم
 
 أكاديمية معارج الاتقان 🕊🌴🌴🌴
 
 قوانين الأكاديمية:
 
-🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات. 
+🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات.
 
 1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
 
@@ -176,55 +144,160 @@ RULES_TEXT = """
 
 3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
 
-4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي.
+4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي @Yosrwerghi، كل من تريد الإنضمام الى مجموعات الحفظ برواية قانون تتواصل مع مسؤولات المجموعات.
 
-5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي.
+5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي، و ربع البقرة تحت إشراف المعلمة زهراء @Zahraamohamed_mahsoup18 والمعلمة أماني amani وميمونة @Aminaoon.
 
 6. ليس لدينا مجموعات حفظ برواية ورش بعد.
 
-7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية.
+🌼🌺 كل من تريد الإنضمام إلى المجموعات او السؤال عن اي شيء يتعلق بها التواصل مع مشرفات المجموعات.
 
-8. ممنوع التواصل مع المعلمات في الخاص.
+7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية . 🛑🛑🛑
 
-💐 شاكرين حسن تعاونكن 🤍
-"""
+8. ممنوع التواصل مع المعلمات في الخاص، أي استفسار يرسل هنا على المقراة أو لمشرفات المجموعات.✋✋
+
+💐💐شاكرين حسن تعاونكن لننهض جميعا بصرح تعليمي شامخ.)"""
 
 # =========================
-# HELP
+# المساعدة
 # =========================
 
 HELP_TEXT = """
-🌸 قائمة أوامر مساعد الأكاديمية 🌸
+🌸 قائمة أوامر الأكاديمية 🌸
 
-📌 /rules
-📌 /schedule
-📌 /help
+/start - قائمة التسجيل
+/rules - القوانين
+/schedule - جدول الحلقات
+/help - المساعدة
 """
 
 # =========================
-# GROUP STORAGE
+# إدارة حذف الرسائل
 # =========================
 
-def save_group(chat_id):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO groups(chat_id,locked) VALUES(?,0)", (chat_id,))
-    conn.commit()
-    conn.close()
-
-# =========================
-# WELCOME DELETE AFTER 5 MIN
-# =========================
-
-def auto_delete(chat_id, message_id):
-    time.sleep(300)
+def delete_after(chat_id, message_id, seconds):
+    time.sleep(seconds)
     try:
         bot.delete_message(chat_id, message_id)
     except:
         pass
 
 # =========================
-# WEBHOOK
+# حفظ المجموعات (للقفل)
+# =========================
+
+groups = set()
+
+# =========================
+# لوحة التسجيل
+# =========================
+
+def menu():
+    markup = telebot.types.InlineKeyboardMarkup()
+
+    markup.add(
+        telebot.types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
+        telebot.types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
+    )
+
+    markup.add(
+        telebot.types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+        telebot.types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
+    )
+
+    markup.add(
+        telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
+    )
+
+    return markup
+
+# =========================
+# تسجيل الأسماء (بسيط بدون DB لتجنب الأخطاء)
+# =========================
+
+data = {}
+
+# =========================
+# أوامر
+# =========================
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id, build_list(), reply_markup=menu())
+
+@bot.message_handler(commands=['rules'])
+def rules(message):
+    bot.send_message(message.chat.id, RULES_TEXT)
+
+@bot.message_handler(commands=['schedule'])
+def schedule(message):
+    bot.send_message(message.chat.id, SCHEDULE_TEXT)
+
+@bot.message_handler(commands=['help'])
+def help_cmd(message):
+    bot.send_message(message.chat.id, HELP_TEXT)
+
+# =========================
+# بناء القائمة
+# =========================
+
+def build_list():
+    text = "📌 قائمة التسجيل:\n\n"
+    if not data:
+        return text + "لا يوجد تسجيلات"
+    for uid, name in data.items():
+        text += f"- {name}\n"
+    return text
+
+# =========================
+# الأزرار
+# =========================
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle(call):
+    uid = call.from_user.id
+    name = call.from_user.full_name
+
+    if call.data == "register":
+        data[uid] = name
+
+    elif call.data == "remove":
+        data.pop(uid, None)
+
+    elif call.data == "read":
+        pass
+
+    elif call.data == "listener":
+        data[uid] = name + " 🎧"
+
+    elif call.data == "excused":
+        data[uid] = name + " ⛔️"
+
+    bot.edit_message_text(
+        build_list(),
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=menu()
+    )
+
+# =========================
+# الترحيب
+# =========================
+
+@bot.message_handler(content_types=["new_chat_members"])
+def welcome(message):
+    for u in message.new_chat_members:
+        msg = bot.send_message(
+            message.chat.id,
+            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
+        )
+        threading.Thread(
+            target=delete_after,
+            args=(message.chat.id, msg.message_id, 300)
+        ).start()
+
+# =========================
+# Webhook
 # =========================
 
 @app.route("/")
@@ -238,76 +311,7 @@ def webhook():
     return "OK"
 
 # =========================
-# COMMANDS
-# =========================
-
-@bot.message_handler(commands=['start'])
-def start_cmd(message):
-    save_group(message.chat.id)
-    bot.send_message(message.chat.id, "🌸 قائمة التسجيل 📝", reply_markup=menu())
-
-@bot.message_handler(commands=['schedule'])
-def schedule_cmd(message):
-    bot.send_message(message.chat.id, SCHEDULE_TEXT)
-
-@bot.message_handler(commands=['rules'])
-def rules_cmd(message):
-    bot.send_message(message.chat.id, RULES_TEXT)
-
-@bot.message_handler(commands=['help'])
-def help_cmd(message):
-    bot.send_message(message.chat.id, HELP_TEXT)
-
-# =========================
-# MENU (التسجيل)
-# =========================
-
-def menu():
-    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
-         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
-        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
-    ])
-
-# =========================
-# CALLBACKS
-# =========================
-
-@bot.callback_query_handler(func=lambda call: True)
-def handle(call):
-    bot.answer_callback_query(call.id)
-
-    if call.data == "register":
-        bot.send_message(call.message.chat.id, "تم تسجيلك ✍️")
-
-    elif call.data == "listener":
-        bot.send_message(call.message.chat.id, "تم تسجيلك كمستمعة 🎧")
-
-    elif call.data == "excused":
-        bot.send_message(call.message.chat.id, "تم تسجيلك كمعتذرة ⛔️")
-
-    elif call.data == "remove":
-        bot.send_message(call.message.chat.id, "تم حذف اسمك ❌")
-
-# =========================
-# WELCOME MESSAGE (GROUP ONLY)
-# =========================
-
-@bot.message_handler(content_types=["new_chat_members"])
-def welcome(message):
-    for u in message.new_chat_members:
-        msg = bot.send_message(
-            message.chat.id,
-            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
-        )
-        threading.Thread(target=auto_delete, args=(message.chat.id, msg.message_id)).start()
-
-# =========================
-# RUN
+# تشغيل
 # =========================
 
 if __name__ == "__main__":
