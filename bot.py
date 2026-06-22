@@ -1,23 +1,184 @@
+import os
+import sqlite3
+import threading
+import time
+import re
+import schedule
+import logging
+from datetime import datetime
+from flask import Flask, request
+
+import telebot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# =========================
+# SETTINGS
+# =========================
+
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+logging.basicConfig(level=logging.INFO)
+
+# =========================
+# SQLITE
+# =========================
+
+DB = "bot.db"
+
+def init_db():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        chat_id INTEGER,
+        user_id INTEGER,
+        name TEXT,
+        status TEXT,
+        read_status INTEGER DEFAULT 0,
+        created_at TEXT,
+        PRIMARY KEY (chat_id, user_id)
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS groups (
+        chat_id INTEGER PRIMARY KEY,
+        locked INTEGER DEFAULT 0
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =========================
+# BOT 1 (نظام التسجيل)
+# =========================
+
+bot_app = Application.builder().token(TOKEN).build()
+
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    try:
+        member = await context.bot.get_chat_member(chat_id, user_id)
+        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
+    except:
+        return False
+
+def get_locked(chat_id):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("INSERT OR IGNORE INTO groups(chat_id,locked) VALUES(?,0)", (chat_id,))
+    conn.commit()
+
+    c.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+    row = c.fetchone()
+    conn.close()
+
+    return row[0] if row else 0
+
+# =========================
+# 📌 قائمة التسجيل (مكملة بالكامل)
+# =========================
+
+def build(chat_id):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    locked = get_locked(chat_id)
+
+    c.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,))
+    data = c.fetchall()
+    conn.close()
+
+    status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def section(status):
+        result = [f"{r[0]}{' ✅' if r[2] else ''}" for r in data if r[1] == status]
+        return "\n".join(result) if result else "لا يوجد"
+
+    return (
+        "السلام عليكم ورحمة الله وبركاته\n"
+        f"📅 {date_str}\n\n"
+        "خادم القرآن الرقمي 💫\n"
+        f"{status_text}\n"
+        "قائمة تسجيل الأدوار 📝\n\n"
+        f"✍️ المسجلات:\n{section('register')}\n\n"
+        f"⛔️ المعتذرات:\n{section('excused')}\n\n"
+        f"🎧 المستمعات:\n{section('listener')}\n\n"
+        f"🚫 المحظورات:\n{section('banned')}\n\n"
+        "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
+    )
+
+def menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
+         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
+        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
+        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+         InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")],
+        [InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")]
+    ])
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        return
+    await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    chat_id = q.message.chat_id
+    user_id = q.from_user.id
+    action = q.data
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    if action in ["register", "listener", "excused"]:
+        c.execute("""
+        INSERT OR REPLACE INTO users(chat_id,user_id,name,status,read_status,created_at)
+        VALUES(?,?,?,?,0,?)
+        """, (chat_id, user_id, q.from_user.full_name, action, datetime.now()))
+
+    elif action == "read":
+        c.execute("""
+        UPDATE users SET read_status = 1-read_status
+        WHERE chat_id=? AND user_id=?
+        """, (chat_id, user_id))
+
+    elif action == "remove":
+        c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+
+    conn.commit()
+    conn.close()
+
+    try:
+        await q.edit_message_text(build(chat_id), reply_markup=menu())
+    except:
+        pass
+
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(buttons))
+
 # =========================
 # BOT 2 (النصوص كاملة بدون أي حذف)
 # =========================
-
-import os
-import telebot
-from flask import Flask, request
-
-# =========================
-# إعداد البوت
-# =========================
-
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
-# النصوص (كاملة 100%)
+# 🔥 النصوص كاملة 100%
 # =========================
 
 WARNING_MESSAGE = "عذراً أختي الكريمة، الأكاديمية مخصصة للنساء فقط، يرجى التأكد من أن الاسم صريح وواضح (بدون رموز أو حرف واحد)."
@@ -31,7 +192,7 @@ WELCOME_MESSAGE = """
 """
 
 # =========================
-# 📚 الجدول كامل
+# 📚 الجدول (بدون تكرار - كامل)
 # =========================
 
 SCHEDULE_TEXT = """
@@ -94,30 +255,12 @@ SCHEDULE_TEXT = """
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : نسمه طه تصحيح جزئى تبارك وعم 
 📝 المشرفة : 
-⏰ التوقيت : الخميس ٤م توقيت مصر
+⏰ التوقيت : الخميس ٤م توقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : فاطمه فتحي 
 حفظ جزئى تبارك وعم بروايه حفص
-📝 المشرفة :؟؟ 
-⏰ التوقيت : تسميع الثلاثاء العاشره 🌤صباحا توقيت مكه ومصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : ميمونة تصحيح تلاوة 
-📝 المشرفة : زهراء اماني
-⏰ التوقيت : يوم الاحد الساعة 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : تاهيل معلمات
-📝 المشرفة : 
-⏰ التوقيت : الاثنين 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : زهراء 
-📝 المشرفة : اماني علي 
-📆 اليوم: السبت 
-⏰ التوقيت : 5 بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نسرين بركات 
-📝 المشرفة : ميمونة 
-📆 اليوم: السبت 
-⏰ التوقيت : 3 مساء بتوقيت مصر 
+📝 المشرفة : ؟؟
+⏰ التوقيت : الثلاثاء العاشرة صباحا
 ❀❀❀❀❀❀❀❀❀❀❀
 
 القرآن في الدنيا نافع🍃
@@ -127,7 +270,7 @@ SCHEDULE_TEXT = """
 """
 
 # =========================
-# 📜 القوانين كاملة
+# 📜 القوانين (كاملة)
 # =========================
 
 RULES_TEXT = """
@@ -143,23 +286,19 @@ RULES_TEXT = """
 
 2. ليس هنالك شروط للإنضمام للأكاديمية سوى الإنضباط.👩‍✈️👩‍✈️
 
-3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
+3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز.❌❌
 
-4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي.
+4. مجموعات الحفظ بروايه قالون و حفص تعمل حسب الجداول.
 
-5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي.
+5. ممنوع نشر الروابط.
 
-6. ليس لدينا مجموعات حفظ برواية ورش بعد.
-
-7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية.
-
-8. ممنوع التواصل مع المعلمات في الخاص.
+6. ممنوع التواصل الخاص.
 
 💐 شاكرين حسن تعاونكن 🤍
 """
 
 # =========================
-# المساعدة
+# HELP
 # =========================
 
 HELP_TEXT = """
@@ -171,7 +310,7 @@ HELP_TEXT = """
 """
 
 # =========================
-# Webhook
+# WEBHOOK + HANDLERS
 # =========================
 
 @app.route("/")
@@ -183,10 +322,6 @@ def webhook():
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
     bot.process_new_updates([update])
     return "OK"
-
-# =========================
-# أوامر البوت
-# =========================
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
@@ -207,13 +342,10 @@ def help_cmd(message):
 @bot.message_handler(content_types=["new_chat_members"])
 def welcome(message):
     for u in message.new_chat_members:
-        bot.send_message(
-            message.chat.id,
-            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
-        )
+        bot.send_message(message.chat.id, f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}")
 
 # =========================
-# تشغيل البوت
+# RUN
 # =========================
 
 if __name__ == "__main__":
