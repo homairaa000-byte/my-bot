@@ -1,6 +1,6 @@
 import os
-import asyncio
 import sqlite3
+import asyncio
 from datetime import datetime
 from aiohttp import web
 
@@ -10,12 +10,11 @@ from telegram import (
     InlineKeyboardMarkup,
     ChatMember
 )
-
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes,
+    ContextTypes
 )
 
 # =========================
@@ -31,15 +30,15 @@ if not WEBHOOK_URL:
     raise ValueError("WEBHOOK_URL is missing")
 
 # =========================
-# DB (SQLite)
+# DATABASE (SQLite)
 # =========================
-DB_FILE = "bot.db"
+DB_PATH = "bot.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
 
-    c.execute("""
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         chat_id INTEGER,
         user_id INTEGER,
@@ -50,7 +49,7 @@ def init_db():
     )
     """)
 
-    c.execute("""
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS groups (
         chat_id INTEGER PRIMARY KEY,
         locked INTEGER DEFAULT 0
@@ -60,8 +59,17 @@ def init_db():
     conn.commit()
     conn.close()
 
-def db():
-    return sqlite3.connect(DB_FILE)
+init_db()
+
+def add_user(chat_id, user_id, name):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+        (chat_id, user_id, name, "active", 0, str(datetime.utcnow()))
+    )
+    conn.commit()
+    conn.close()
 
 # =========================
 # APPLICATION
@@ -73,7 +81,7 @@ app = Application.builder().token(TOKEN).build()
 # =========================
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
-قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم".
+قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
 
 أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
 """
@@ -125,6 +133,11 @@ def menu():
 # COMMANDS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+
+    add_user(chat.id, user.id, user.full_name)
+
     await update.message.reply_text(WELCOME_MESSAGE, reply_markup=menu())
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,11 +160,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("تم الإغلاق.")
 
 # =========================
-# DB INIT
-# =========================
-init_db()
-
-# =========================
 # HANDLERS
 # =========================
 app.add_handler(CommandHandler("start", start))
@@ -159,7 +167,7 @@ app.add_handler(CommandHandler("help", help_command))
 app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK
+# WEBHOOK SERVER (FIXED + RENDER SAFE)
 # =========================
 async def handle(request):
     data = await request.json()
@@ -173,9 +181,7 @@ async def run():
 
     webhook_path = f"/{TOKEN}"
 
-    await app.bot.set_webhook(
-        url=f"{WEBHOOK_URL}{webhook_path}"
-    )
+    await app.bot.set_webhook(url=f"{WEBHOOK_URL}{webhook_path}")
 
     aio_app = web.Application()
     aio_app.router.add_post(webhook_path, handle)
@@ -187,13 +193,10 @@ async def run():
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-    print("🚀 BOT IS LIVE (SQLite VERSION)")
+    print("🚀 Bot is running on Render")
 
     while True:
         await asyncio.sleep(3600)
 
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
     asyncio.run(run())
