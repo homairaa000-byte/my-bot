@@ -1,8 +1,8 @@
 import os
 import asyncio
+import sqlite3
 from datetime import datetime
 from aiohttp import web
-import asyncpg
 
 from telegram import (
     Update,
@@ -24,14 +24,44 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 10000))
-DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN is missing")
 if not WEBHOOK_URL:
     raise ValueError("WEBHOOK_URL is missing")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL is missing")
+
+# =========================
+# DB (SQLite)
+# =========================
+DB_FILE = "bot.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        chat_id INTEGER,
+        user_id INTEGER,
+        name TEXT,
+        status TEXT,
+        read_status INTEGER DEFAULT 0,
+        created_at TEXT
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS groups (
+        chat_id INTEGER PRIMARY KEY,
+        locked INTEGER DEFAULT 0
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+def db():
+    return sqlite3.connect(DB_FILE)
 
 # =========================
 # APPLICATION
@@ -39,53 +69,13 @@ if not DATABASE_URL:
 app = Application.builder().token(TOKEN).build()
 
 # =========================
-# INIT DB (PRODUCTION SAFE)
-# =========================
-async def init_db():
-    conn = await asyncpg.connect(DATABASE_URL)
-
-    await conn.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        chat_id BIGINT,
-        user_id BIGINT,
-        name TEXT,
-        status TEXT,
-        read_status BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP
-    )
-    """)
-
-    await conn.execute("""
-    CREATE TABLE IF NOT EXISTS groups (
-        chat_id BIGINT PRIMARY KEY,
-        locked BOOLEAN DEFAULT FALSE
-    )
-    """)
-
-    await conn.close()
-
-# =========================
-# ADMIN CHECK
-# =========================
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        member = await context.bot.get_chat_member(
-            update.effective_chat.id,
-            update.effective_user.id
-        )
-        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-    except:
-        return False
-
-# =========================
 # TEXTS (كما هي بدون حذف)
 # =========================
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
-قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
+قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم".
 
 أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
-يرجى قراءة القوانين والالتزام بها.
 """
 
 RULES_TEXT = """
@@ -95,40 +85,30 @@ RULES_TEXT = """
 
 قوانين الأكاديمية:
 
-🌴🌴 الأكاديمية تعنى بتقديم كل ما يتعلق بالقرآن والتجويد.
-
 1. الأكاديمية خاصة بالنساء فقط 🚫
 2. الالتزام مطلوب 👩‍✈️
 3. يمنع الرموز في الأسماء ❌
 4. الالتزام بالمجموعات التعليمية
 5. ممنوع نشر الروابط 🛑
-6. ممنوع التواصل الخاص ✋
+6. ممنوع الخاص ✋
 """
 
 SCHEDULE_TEXT = """
 📅 جدول حلقات المقرأة
 
 💐 المعلمة : لطيفة
-📝 تصحيح تلاوة
 ⏰ الإثنين 12 مكة
 
-💐 المعلمة : لطيفة
-📝 المخارج
-⏰ الثلاثاء 12 مكة
+💐 المعلمة : مريم
+⏰ الثلاثاء 3 ليبيا
 
-💐 المعلمة : عالية محمد
-⏰ 6:00 مساء مكة
-
-💐 المعلمة : مريم ياسين
-⏰ 3 مساء ليبيا
-
-🌿 القرآن في الدنيا نافع وفي القبر شافع وفي الجنة رافع
+🌿 القرآن نافع في الدنيا والآخرة
 """
 
 HELP_TEXT = """
 🌸 الأوامر:
-/start - تشغيل البوت
-/help - المساعدة
+/start - تشغيل
+/help - مساعدة
 """
 
 # =========================
@@ -167,14 +147,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("تم الإغلاق.")
 
 # =========================
-# REGISTER HANDLERS
+# DB INIT
+# =========================
+init_db()
+
+# =========================
+# HANDLERS
 # =========================
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("help", help_command))
 app.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK HANDLER
+# WEBHOOK
 # =========================
 async def handle(request):
     data = await request.json()
@@ -182,16 +167,9 @@ async def handle(request):
     await app.process_update(update)
     return web.Response(text="OK")
 
-# =========================
-# START SERVER
-# =========================
 async def run():
-    # 🔥 إصلاح أهم خطأ في PTB 22+
     await app.initialize()
     await app.start()
-
-    # إنشاء الجداول تلقائياً
-    await init_db()
 
     webhook_path = f"/{TOKEN}"
 
@@ -209,7 +187,7 @@ async def run():
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-    print("🚀 BOT IS LIVE ON RENDER")
+    print("🚀 BOT IS LIVE (SQLite VERSION)")
 
     while True:
         await asyncio.sleep(3600)
