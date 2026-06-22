@@ -11,20 +11,19 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
 
 
-async def main():
+async def run_bot():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-
-    print("Bot is running...")
 
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
 
-    # يخلي البوت شغال للأبد
+    print("Bot is running...")
+
     await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bot())
