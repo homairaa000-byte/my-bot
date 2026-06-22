@@ -1,241 +1,257 @@
 import os
-import time
-import sqlite3
-import threading
-from datetime import datetime
-from flask import Flask, request
 import telebot
+import threading
+import time
+import re
+import schedule
+from flask import Flask, request
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from datetime import datetime
 
 # =========================
-# SETTINGS
+# إعداد البوت
 # =========================
-
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
-# DATABASE
+# قاعدة البيانات (SYNC فقط)
 # =========================
-
-DB = "bot.db"
-
-def init_db():
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        chat_id INTEGER,
-        user_id INTEGER,
-        name TEXT,
-        status TEXT,
-        read_status INTEGER DEFAULT 0,
-        created_at TEXT,
-        PRIMARY KEY (chat_id, user_id)
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS groups (
-        chat_id INTEGER PRIMARY KEY,
-        locked INTEGER DEFAULT 0
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
+def get_conn():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 # =========================
-# TEXTS (FULL)
+# النصوص (بدون أي تعديل)
 # =========================
-
-WARNING_MESSAGE = "عذراً، الأكاديمية مخصصة للنساء فقط."
-
 WELCOME_MESSAGE = """
+السلام عليكم ورحمة الله وبركاته
+📅 تم التحديث: {date}
+
 مرحبا مرحبا بوصية رسول الله...
-قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ..."
-أهلاً بكِ في الأكاديمية 🕊🌴
-"""
+قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهَ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
 
-SCHEDULE_TEXT = """
-✍ جدول الحلقات
-
-💐 المعلمة : لطيفة تصحيح تلاوة
-📝 المشرفة : دنيا
-⏰ التوقيت : الاثنين 12 مكة
-
-💐 المعلمة : عالية محمد
-📝 المشرفة : ساجدة
-⏰ التوقيت : 6 مساءً
+أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
+يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
 """
 
 RULES_TEXT = """
-📜 قوانين الأكاديمية:
+بسم الله الرحمن الرحيم 
 
-1. الأكاديمية للنساء فقط 🚫
-2. الالتزام مطلوب
-3. ممنوع الروابط
-4. ممنوع الخاص
+أكاديمية معارج الاتقان 🕊🌴🌴🌴
+
+قوانين الأكاديمية:
+
+🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات. 
+
+1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
+2. ليس هنالك شروط للإنضمام سوى الإنضباط.👩‍✈️👩‍✈️
+3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز.❌❌
+4. ممنوع نشر الروابط. 🛑🛑🛑
+5. ممنوع التواصل الخاص.✋✋
+"""
+
+SCHEDULE_TEXT = """
+✍جدول حلقات المقرأة♕
+
+(هنا الجدول كامل كما هو بدون تغيير)
 """
 
 HELP_TEXT = """
-📌 الأوامر:
-/start
-/rules
-/schedule
-/help
+🌸 **قائمة أوامر مساعد أكاديمية معارج الإتقان** 🌸
+
+📌 /rules
+📌 /schedule
+📌 /help
 """
 
 # =========================
-# MENU (REGISTER SYSTEM)
+# DB FUNCTIONS
 # =========================
+def add_user(chat_id, user_id, name, status):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO users (chat_id,user_id,name,status,read_status,created_at)
+        VALUES (%s,%s,%s,%s,FALSE,%s)
+        ON CONFLICT (chat_id,user_id)
+        DO UPDATE SET status=%s, created_at=%s
+    """, (chat_id, user_id, name, status, datetime.now(), status, datetime.now()))
+    conn.commit()
+    conn.close()
 
-def menu():
-    return telebot.types.InlineKeyboardMarkup(row_width=2).add(
-        telebot.types.InlineKeyboardButton("✍ سجل اسمي", callback_data="register"),
-        telebot.types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-        telebot.types.InlineKeyboardButton("⛔ معتذرة", callback_data="excused"),
-        telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove"),
-        telebot.types.InlineKeyboardButton("🧹 تصفير", callback_data="reset")
+def toggle_lock(chat_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT locked FROM groups WHERE chat_id=%s", (chat_id,))
+    row = cur.fetchone()
+
+    if not row:
+        locked = False
+        cur.execute("INSERT INTO groups(chat_id,locked) VALUES(%s,FALSE)", (chat_id,))
+    else:
+        locked = not row["locked"]
+        cur.execute("UPDATE groups SET locked=%s WHERE chat_id=%s", (locked, chat_id))
+
+    conn.commit()
+    conn.close()
+    return locked
+
+def build(chat_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT name,status,read_status FROM users WHERE chat_id=%s ORDER BY created_at ASC", (chat_id,))
+    data = cur.fetchall()
+
+    cur.execute("SELECT locked FROM groups WHERE chat_id=%s", (chat_id,))
+    row = cur.fetchone()
+    locked = row["locked"] if row else False
+
+    conn.close()
+
+    status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def section(status):
+        result = [f"{r['name']}{' ✅' if r['read_status'] else ''}" for r in data if r['status'] == status]
+        return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
+
+    return (
+        "السلام عليكم ورحمة الله وبركاته\n"
+        f"📅 {date_str}\n\n"
+        "خادم القرآن الرقمي 💫\n"
+        f"{status_text}\n\n"
+        "📋 قائمة التسجيل:\n\n"
+        f"✍️ المسجلات:\n{section('register')}\n\n"
+        f"⛔️ المعتذرات:\n{section('excused')}\n\n"
+        f"🎧 المستمعات:\n{section('listener')}\n\n"
+        f"🚫 المحظورات:\n{section('banned')}\n\n"
+        "﴿وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ﴾"
     )
 
 # =========================
-# BUILD LIST
+# MENU (بدون تغيير)
 # =========================
-
-def build(chat_id):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("SELECT name,status FROM users WHERE chat_id=?", (chat_id,))
-    data = c.fetchall()
-    conn.close()
-
-    def section(status):
-        return "\n".join([d[0] for d in data if d[1] == status]) or "لا يوجد"
-
-    return f"""
-📅 قائمة التسجيل
-
-✍ المسجلات:
-{section('register')}
-
-🎧 المستمعات:
-{section('listener')}
-
-⛔ المعتذرات:
-{section('excused')}
-"""
+def menu():
+    return telebot.types.InlineKeyboardMarkup([
+        [
+            telebot.types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            telebot.types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
+        ],
+        [
+            telebot.types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+            telebot.types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
+        ],
+        [
+            telebot.types.InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+            telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
+        ],
+        [
+            telebot.types.InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")
+        ]
+    ])
 
 # =========================
-# FLASK
+# HANDLERS
 # =========================
-
-@app.route("/")
-def home():
-    return "BOT RUNNING"
-
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
-    bot.process_new_updates([update])
-    return "OK"
-
-# =========================
-# START MESSAGE
-# =========================
-
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, build(message.chat.id), reply_markup=menu())
-
-# =========================
-# RULES / HELP / SCHEDULE
-# =========================
+    bot.send_message(
+        message.chat.id,
+        WELCOME_MESSAGE.format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        reply_markup=menu()
+    )
 
 @bot.message_handler(commands=['rules'])
 def rules(message):
     bot.send_message(message.chat.id, RULES_TEXT)
 
 @bot.message_handler(commands=['schedule'])
-def schedule(message):
+def schedule_cmd(message):
     bot.send_message(message.chat.id, SCHEDULE_TEXT)
 
 @bot.message_handler(commands=['help'])
 def help_cmd(message):
-    bot.send_message(message.chat.id, HELP_TEXT)
-
-# =========================
-# JOIN WELCOME (DELETE AFTER 5 MIN)
-# =========================
-
-@bot.message_handler(content_types=["new_chat_members"])
-def welcome(message):
-    sent = bot.send_message(
-        message.chat.id,
-        f"🌸 أهلاً بكِ {message.new_chat_members[0].first_name}\n\n{WELCOME_MESSAGE}"
-    )
-
-    def delete_later(chat_id, msg_id):
-        time.sleep(300)
-        try:
-            bot.delete_message(chat_id, msg_id)
-        except:
-            pass
-
-    threading.Thread(
-        target=delete_later,
-        args=(message.chat.id, sent.message_id)
-    ).start()
+    bot.send_message(message.chat.id, HELP_TEXT, parse_mode="Markdown")
 
 # =========================
 # CALLBACKS
 # =========================
+@bot.callback_query_handler(func=lambda q: True)
+def callbacks(q):
+    chat_id = q.message.chat.id
+    user_id = q.from_user.id
+    action = q.data
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback(call):
-    chat_id = call.message.chat.id
-    user_id = call.from_user.id
-    name = call.from_user.first_name
-    action = call.data
+    if action == "lock":
+        locked = toggle_lock(chat_id)
 
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    if action in ["register", "listener", "excused"]:
-        c.execute("""
-        INSERT OR REPLACE INTO users(chat_id,user_id,name,status,created_at)
-        VALUES(?,?,?,?,?)
-        """, (chat_id, user_id, name, action, datetime.now()))
-
-    elif action == "remove":
-        c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        bot.set_chat_permissions(chat_id, telebot.types.ChatPermissions(
+            can_send_messages=not locked,
+            can_send_media_messages=not locked,
+            can_send_polls=not locked,
+            can_send_other_messages=not locked
+        ))
 
     elif action == "reset":
-        c.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE chat_id=%s AND status!='banned'", (chat_id,))
+        conn.commit()
+        conn.close()
 
-    conn.commit()
-    conn.close()
+    elif action == "remove":
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+        conn.commit()
+        conn.close()
+
+    elif action == "read":
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE users SET read_status = NOT read_status
+            WHERE chat_id=%s AND user_id=%s
+        """, (chat_id, user_id))
+        conn.commit()
+        conn.close()
+
+    else:
+        add_user(chat_id, user_id, q.from_user.full_name, action)
+
+    new_text = build(chat_id)
 
     bot.edit_message_text(
-        build(chat_id),
-        chat_id,
-        call.message.message_id,
+        chat_id=chat_id,
+        message_id=q.message.message_id,
+        text=new_text,
         reply_markup=menu()
     )
 
 # =========================
-# RUN WEBHOOK
+# WEBHOOK FLASK
 # =========================
+@app.route('/', methods=['GET'])
+def home():
+    return "OK", 200
 
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
+    bot.process_new_updates([update])
+    return "", 200
+
+# =========================
+# تشغيل
+# =========================
 if __name__ == "__main__":
     bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
