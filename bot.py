@@ -1,102 +1,71 @@
 import os
 import logging
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 
 # =========================
 # CONFIG
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = os.getenv("BASE_URL")  # https://your-app.onrender.com
-WEBHOOK_PATH = f"/webhook/{TOKEN}"
-WEBHOOK_URL = f"{BASE_URL}{WEBHOOK_PATH}"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # مثال: https://your-app.onrender.com
+PORT = int(os.getenv("PORT", 10000))
 
 logging.basicConfig(level=logging.INFO)
 
-# =========================
-# FLASK APP
-# =========================
-app = Flask(__name__)
+app_flask = Flask(__name__)
 
 # =========================
 # TELEGRAM APP
 # =========================
-application = Application.builder().token(TOKEN).build()
+telegram_app = Application.builder().token(TOKEN).build()
+
 
 # =========================
-# START COMMAND
+# HANDLERS
 # =========================
-async def start(update: Update, context):
-    keyboard = [
-        [InlineKeyboardButton("📜 القوانين", callback_data="rules")],
-        [InlineKeyboardButton("📅 الجدول", callback_data="schedule")]
-    ]
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🤖 البوت يعمل بنجاح (Webhook Mode)")
 
-    await update.message.reply_text(
-        "👋 أهلاً بك في البوت",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
 
-# =========================
-# CALLBACK BUTTONS
-# =========================
-async def buttons(update: Update, context):
-    query = update.callback_query
-    await query.answer()
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(update.message.text)
 
-    if query.data == "rules":
-        await query.edit_message_text(
-            "📜 القوانين:\n- احترام الجميع\n- عدم السب\n- الالتزام"
-        )
 
-    elif query.data == "schedule":
-        await query.edit_message_text(
-            "📅 الجدول:\n- تحديثات يومية\n- محتوى مستمر"
-        )
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-# =========================
-# REGISTER HANDLERS
-# =========================
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
 # WEBHOOK ENDPOINT
 # =========================
-@app.route(WEBHOOK_PATH, methods=["POST"])
+@app_flask.post(f"/{TOKEN}")
 def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
-    application.process_update(update)
-    return "OK"
+    update = Update.de_json(request.get_json(force=True), telegram_app)
+    telegram_app.update_queue.put_nowait(update)
+    return "ok"
 
-# =========================
-# HEALTH CHECK (Render)
-# =========================
-@app.route("/")
+
+@app_flask.get("/")
 def home():
-    return "Bot is running via Webhook ✅"
+    return "Bot is running ✔"
+
 
 # =========================
-# SETUP WEBHOOK (ON START)
+# STARTUP
 # =========================
 def set_webhook():
-    import requests
-    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
-    requests.get(url, params={"url": WEBHOOK_URL})
-    logging.info(f"Webhook set to: {WEBHOOK_URL}")
+    url = f"{WEBHOOK_URL}/{TOKEN}"
+    telegram_app.bot.set_webhook(url=url)
+    print("Webhook set:", url)
 
-# =========================
-# INIT BOT
-# =========================
-with application:
-    application.initialize()
-    set_webhook()
 
-# =========================
-# RUN SERVER
-# =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    set_webhook()
+    app_flask.run(host="0.0.0.0", port=PORT)
