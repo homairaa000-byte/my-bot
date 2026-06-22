@@ -1,90 +1,134 @@
+# =========================
+# BOT 2 (النصوص كاملة بدون أي حذف)
+# =========================
+
 import os
-import sqlite3
-import asyncio
-from datetime import datetime
-from aiohttp import web
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ChatMember
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes
-)
+import telebot
+from flask import Flask, request
 
 # =========================
-# CONFIG
+# إعداد البوت
 # =========================
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.getenv("PORT", 10000))
 
-if not TOKEN:
-    raise ValueError("BOT_TOKEN is missing")
-if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL is missing")
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 # =========================
-# DATABASE (SQLite)
+# النصوص (كاملة 100%)
 # =========================
-DB_PATH = "bot.db"
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+WARNING_MESSAGE = "عذراً أختي الكريمة، الأكاديمية مخصصة للنساء فقط، يرجى التأكد من أن الاسم صريح وواضح (بدون رموز أو حرف واحد)."
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        chat_id INTEGER,
-        user_id INTEGER,
-        name TEXT,
-        status TEXT,
-        read_status INTEGER DEFAULT 0,
-        created_at TEXT
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS groups (
-        chat_id INTEGER PRIMARY KEY,
-        locked INTEGER DEFAULT 0
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-def add_user(chat_id, user_id, name):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-        (chat_id, user_id, name, "active", 0, str(datetime.utcnow()))
-    )
-    conn.commit()
-    conn.close()
-
-# =========================
-# APPLICATION
-# =========================
-app = Application.builder().token(TOKEN).build()
-
-# =========================
-# TEXTS (كما هي بدون حذف)
-# =========================
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
 قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
 
 أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
+يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
 """
+
+# =========================
+# 📚 الجدول كامل
+# =========================
+
+SCHEDULE_TEXT = """
+" ✍جدول حلقات المقرأة♕
+
+꧁꧁꧁꧁꧂꧂꧂꧂
+
+💐 المعلمة : لطيفة تصحيح تلاوة
+📝 المشرفة : دنيا
+⏰ التوقيت : الأثنين 12مكة
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : لطيفة المخارج
+📝 المشرفة : دنيا
+⏰ التوقيت : الثلاثاء 12مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : لطيفة
+📝 المشرفة : ..دنيا.
+⏰ التوقيت : الأربعاء تأهيل المعلمات 12مكة
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : لطيفة ربع يس 
+📝 المشرفة : احلام وليلي
+⏰ التوقيت : الخميس 12 مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : منى الدسوقي أصول ورش 
+📝 المشرفة : لطيفة
+⏰ التوقيت : الأثنين والاربعاء الخامسة مكة
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : عالية محمد (تصحيح تلاوة جزء عم) 
+📝 المشرفة : ساجدة علي
+⏰ التوقيت : 6:00 م بتوقيت مكة.. 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : إيمان عجلان ﴿تصحيح جزء عم ﴾حفص
+📝 المشرفة : ----
+⏰ التوقيت : السبت 10.00صباحا توقيت مكه
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : يسر أم عبد الرحمن (تصحيح جزء تبارك)
+📝 المشرفة : متى يوسفي
+⏰ التوقيت : 10مساءا توقيت مكة
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : أميرة عزت 
+شرح احكام النون الساكنه والتنوين 
+📝 المشرفة : دنيا
+⏰ التوقيت : الاحد 3عصرا بتوقيت مكه 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : مريم ياسين 
+📝 المشرفة : 
+⏰ التوقيت : الثالثة مساءا بتوقيت ليبيا
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : عائشة عبدالسلام ( حفظ سوره البقرة برواية قالون ) 
+📝 المشرفة : ليلي القطروني... ام سومه(هاجر محمد علي) 
+⏰ التوقيت :الثلاثاء..الثالثة مساء 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : نهى السعيد(حفظ ربع يس برواية حفص ) 
+📝 المشرفة : ليلى القطرونى -عائشة عبد السلام
+⏰ التوقيت : السبت -2ظهرا بتوقيت مصر 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : أم ساجدة 
+📝 المشرفة : ساجدة 
+⏰ التوقيت : العاشرة صباحا بتوقيت ليبيا 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : نسمه طه تصحيح جزئى تبارك وعم 
+📝 المشرفة : 
+⏰ التوقيت : الخميس ٤م توقيت مصر
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : فاطمه فتحي 
+حفظ جزئى تبارك وعم بروايه حفص
+📝 المشرفة :؟؟ 
+⏰ التوقيت : تسميع الثلاثاء العاشره 🌤صباحا توقيت مكه ومصر 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : ميمونة تصحيح تلاوة 
+📝 المشرفة : زهراء اماني
+⏰ التوقيت : يوم الاحد الساعة 2 توقيت مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : تاهيل معلمات
+📝 المشرفة : 
+⏰ التوقيت : الاثنين 2 توقيت مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : زهراء 
+📝 المشرفة : اماني علي 
+📆 اليوم: السبت 
+⏰ التوقيت : 5 بتوقيت مصر 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : نسرين بركات 
+📝 المشرفة : ميمونة 
+📆 اليوم: السبت 
+⏰ التوقيت : 3 مساء بتوقيت مصر 
+❀❀❀❀❀❀❀❀❀❀❀
+
+القرآن في الدنيا نافع🍃
+وفي القبر شافع🍃
+وفي الجنة رافع🍃
+اللهم اجعلنا من أهله وخاصته🤲🌹
+"""
+
+# =========================
+# 📜 القوانين كاملة
+# =========================
 
 RULES_TEXT = """
 بسم الله الرحمن الرحيم 
@@ -93,110 +137,86 @@ RULES_TEXT = """
 
 قوانين الأكاديمية:
 
-1. الأكاديمية خاصة بالنساء فقط 🚫
-2. الالتزام مطلوب 👩‍✈️
-3. يمنع الرموز في الأسماء ❌
-4. الالتزام بالمجموعات التعليمية
-5. ممنوع نشر الروابط 🛑
-6. ممنوع الخاص ✋
+🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات. 
+
+1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
+
+2. ليس هنالك شروط للإنضمام للأكاديمية سوى الإنضباط.👩‍✈️👩‍✈️
+
+3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
+
+4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي.
+
+5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي.
+
+6. ليس لدينا مجموعات حفظ برواية ورش بعد.
+
+7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية.
+
+8. ممنوع التواصل مع المعلمات في الخاص.
+
+💐 شاكرين حسن تعاونكن 🤍
 """
 
-SCHEDULE_TEXT = """
-📅 جدول حلقات المقرأة
-
-💐 المعلمة : لطيفة
-⏰ الإثنين 12 مكة
-
-💐 المعلمة : مريم
-⏰ الثلاثاء 3 ليبيا
-
-🌿 القرآن نافع في الدنيا والآخرة
-"""
+# =========================
+# المساعدة
+# =========================
 
 HELP_TEXT = """
-🌸 الأوامر:
-/start - تشغيل
-/help - مساعدة
+🌸 قائمة أوامر مساعد الأكاديمية 🌸
+
+📌 /rules
+📌 /schedule
+📌 /help
 """
 
 # =========================
-# MENU
+# Webhook
 # =========================
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📜 القوانين", callback_data="rules")],
-        [InlineKeyboardButton("📅 الجدول", callback_data="schedule")],
-        [InlineKeyboardButton("❌ إغلاق", callback_data="close")]
-    ])
 
-# =========================
-# COMMANDS
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    chat = update.effective_chat
+@app.route("/")
+def home():
+    return "OK"
 
-    add_user(chat.id, user.id, user.full_name)
-
-    await update.message.reply_text(WELCOME_MESSAGE, reply_markup=menu())
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(HELP_TEXT)
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "OK"
 
 # =========================
-# BUTTONS
+# أوامر البوت
 # =========================
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
 
-    if q.data == "rules":
-        await q.edit_message_text(RULES_TEXT, reply_markup=menu())
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    bot.send_message(message.chat.id, "🌸 أهلاً بكِ في الأكاديمية 🌸")
 
-    elif q.data == "schedule":
-        await q.edit_message_text(SCHEDULE_TEXT, reply_markup=menu())
+@bot.message_handler(commands=['schedule'])
+def schedule_cmd(message):
+    bot.send_message(message.chat.id, SCHEDULE_TEXT)
 
-    elif q.data == "close":
-        await q.edit_message_text("تم الإغلاق.")
+@bot.message_handler(commands=['rules'])
+def rules_cmd(message):
+    bot.send_message(message.chat.id, RULES_TEXT)
+
+@bot.message_handler(commands=['help'])
+def help_cmd(message):
+    bot.send_message(message.chat.id, HELP_TEXT)
+
+@bot.message_handler(content_types=["new_chat_members"])
+def welcome(message):
+    for u in message.new_chat_members:
+        bot.send_message(
+            message.chat.id,
+            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
+        )
 
 # =========================
-# HANDLERS
+# تشغيل البوت
 # =========================
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("help", help_command))
-app.add_handler(CallbackQueryHandler(buttons))
-
-# =========================
-# WEBHOOK SERVER (FIXED + RENDER SAFE)
-# =========================
-async def handle(request):
-    data = await request.json()
-    update = Update.de_json(data, app.bot)
-    await app.process_update(update)
-    return web.Response(text="OK")
-
-async def run():
-    await app.initialize()
-    await app.start()
-
-    webhook_path = f"/{TOKEN}"
-
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}{webhook_path}")
-
-    aio_app = web.Application()
-    aio_app.router.add_post(webhook_path, handle)
-    aio_app.router.add_get("/", lambda r: web.Response(text="Bot is running"))
-
-    runner = web.AppRunner(aio_app)
-    await runner.setup()
-
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-
-    print("🚀 Bot is running on Render")
-
-    while True:
-        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
