@@ -1,50 +1,61 @@
 import asyncio
-from flask import Flask, request
+from aiohttp import web
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from config import TOKEN, WEBHOOK_URL
-from database import init_db, add_user
-
-app = Flask(__name__)
-
-# ===== Bot Application =====
-bot_app = Application.builder().token(TOKEN).build()
+from config import TOKEN, WEBHOOK_URL, PORT
 
 
-# ===== /start =====
+# =========================
+# أوامر البوت
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await add_user(user_id)
-
-    await update.message.reply_text("👋 أهلاً بك! البوت يعمل بنجاح 🚀")
+    await update.message.reply_text("👋 البوت يعمل بنظام Webhook V5")
 
 
-bot_app.add_handler(CommandHandler("start", start))
+# =========================
+# التطبيق
+# =========================
+app = Application.builder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
 
 
-# ===== Webhook Route =====
-@app.post(f"/{TOKEN}")
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    bot_app.process_update(update)
-    return "ok"
+# =========================
+# Webhook handler (صحيح)
+# =========================
+async def handle(request):
+    data = await request.json()
+
+    update = Update.de_json(data, app.bot)
+    await app.process_update(update)
+
+    return web.Response(text="OK")
 
 
-# ===== تشغيل البوت =====
-async def run():
-    await init_db()
+# =========================
+# تشغيل السيرفر
+# =========================
+async def run_webhook():
+    await app.bot.set_webhook(url=WEBHOOK_URL)
 
-    await bot_app.initialize()
-    await bot_app.start()
+    aio_app = web.Application()
+    aio_app.router.add_post(f"/{TOKEN}", handle)
 
-    await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    runner = web.AppRunner(aio_app)
+    await runner.setup()
 
-    print("🚀 Bot is running with Webhook")
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
 
-    await asyncio.Event().wait()
+    print("🚀 Webhook running...")
+
+    while True:
+        await asyncio.sleep(3600)
 
 
+# =========================
+# main
+# =========================
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(run_webhook())
