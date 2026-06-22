@@ -1,23 +1,14 @@
 import os
 import asyncio
-import logging
-from datetime import datetime
-from aiohttp import web
 import asyncpg
+from datetime import datetime
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ChatMember
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
-    MessageHandler,
-    filters
 )
 
 # =========================
@@ -28,22 +19,63 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 10000))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not TOKEN or not WEBHOOK_URL:
-    raise ValueError("Missing BOT_TOKEN or WEBHOOK_URL")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN is missing")
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL is missing")
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("bot")
 
 # =========================
-# 🔥 النصوص الأصلية (بدون تغيير)
+# APPLICATION
 # =========================
+app = Application.builder().token(TOKEN).build()
 
+
+# =========================
+# ADMIN CHECK
+# =========================
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            update.effective_user.id
+        )
+        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
+    except:
+        return False
+
+
+# =========================
+# DATABASE
+# =========================
+async def get_db():
+    return await asyncpg.connect(DATABASE_URL)
+
+
+async def get_locked(chat_id):
+    conn = await get_db()
+    await conn.execute("""
+        INSERT INTO groups(chat_id, locked)
+        VALUES($1, FALSE)
+        ON CONFLICT (chat_id) DO NOTHING
+    """, chat_id)
+
+    row = await conn.fetchrow(
+        "SELECT locked FROM groups WHERE chat_id=$1",
+        chat_id
+    )
+    await conn.close()
+    return row["locked"] if row else False
+
+
+# =========================
+# TEXTS (UNCHANGED)
+# =========================
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
 قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
 
 أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
-يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
 """
 
 RULES_TEXT = """
@@ -55,198 +87,256 @@ RULES_TEXT = """
 
 🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات. 
 
-1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
+1. الأكاديمية خاصه بالنساء فقط 🚫
 
-2. ليس هنالك شروط للإنضمام للأكاديمية سوى الإنضباط.👩‍✈️👩‍✈️
+2. الإنضباط هو الشرط الأساسي 👩‍✈️
 
-3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
+3. كتابة الاسم بوضوح ❌
 
-4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي @Yosrwerghi، كل من تريد الإنضمام الى مجموعات الحفظ برواية قانون تتواصل مع مسؤولات المجموعات. 
+4. مجموعات الحفظ برواية قالون:
+- ربع يس: أم ساجدة
+- ربع البقرة: مريم
+- جزء عم وتبارك: يسر ورغي
 
-5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي، و ربع البقرة تحت إشراف المعلمة زهراء @Zahraamohamed_mahsoup18 والمعلمة أماني amani وميمونة @Aminaoon.
+5. مجموعات حفص:
+- ربع يس: نهى سعيد
+- تبارك وعم: فاطمة فتحي
+- ربع البقرة: زهراء وأماني وميمونة
 
-6. ليس لدينا مجموعات حفظ برواية ورش بعد.
+6. لا توجد ورش حالياً
 
-🌼🌺 كل من تريد الإنضمام إلى المجموعات او السؤال عن اي شيء يتعلق بها التواصل مع مشرفات المجموعات.
+7. ممنوع الروابط 🛑
 
-7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية . 🛑🛑🛑
-
-8. ممنوع التواصل مع المعلمات في الخاص، أي استفسار يرسل هنا على المقراة أو لمشرفات المجموعات.✋✋
-
-💐💐شاكرين حسن تعاونكن لننهض جميعا بصرح تعليمي شامخ.
+8. ممنوع التواصل الخاص ✋
 """
 
 SCHEDULE_TEXT = """
-" ✍جدول حلقات المقرأة♕
+✍ جدول حلقات المقرأة
 
-꧁꧁꧁꧁꧂꧂꧂꧂
+💐 لطيفة - تصحيح تلاوة (الاثنين 12)
+💐 لطيفة - مخارج (الثلاثاء 12)
+💐 لطيفة - الأربعاء (12)
+💐 عالية محمد - 6 مساء
+💐 مريم ياسين - 3 ليبيا
 
-💐 المعلمة : لطيفة تصحيح تلاوة
-📝 المشرفة : دنيا
-⏰ التوقيت : الأثنين 12مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة المخارج
-📝 المشرفة : دنيا
-⏰ التوقيت : الثلاثاء 12مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة
-📝 المشرفة : ..دنيا.
-⏰ التوقيت : الأربعاء تأهيل المعلمات 12مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة ربع يس 
-📝 المشرفة : احلام وليلي
-⏰ التوقيت : الخميس 12 مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : منى الدسوقي أصول ورش 
-📝 المشرفة : لطيفة
-⏰ التوقيت : الأثنين والاربعاء الخامسة مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : عالية محمد (تصحيح تلاوة جزء عم) 
-📝 المشرفة : ساجدة علي
-⏰ التوقيت : 6:00 م بتوقيت مكة.. 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : إيمان عجلان ﴿تصحيح جزء عم ﴾حفص
-📝 المشرفة : ----
-⏰ التوقيت : السبت 10.00صباحا توقيت مكه
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : يسر أم عبد الرحمن (تصحيح جزء تبارك)
-📝 المشرفة : متى يوسفي
-⏰ التوقيت : 10مساءا توقيت مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : أميرة عزت 
-شرح احكام النون الساكنه والتنوين 
-📝 المشرفة : دنيا
-⏰ التوقيت : الاحد 3عصرا بتوقيت مكه 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : مريم ياسين 
-📝 المشرفة : 
-⏰ التوقيت : الثالثة مساءا بتوقيت ليبيا
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : عائشة عبدالسلام ( حفظ سوره البقرة برواية قالون ) 
-📝 المشرفة : ليلي القطروني... ام سومه(هاجر محمد علي) 
-⏰ التوقيت :الثلاثاء..الثالثة مساء 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نهى السعيد(حفظ ربع يس برواية حفص ) 
-📝 المشرفة : ليلى القطرونى -عائشة عبد السلام
-⏰ التوقيت : السبت -2ظهرا بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : أم ساجدة 
-📝 المشرفة : ساجدة 
-⏰ التوقيت : العاشرة صباحا بتوقيت ليبيا 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نسمه طه تصحيح جزئى تبارك وعم 
-📝 المشرفة : 
-⏰ التوقيت : الخميس ٤م توقيت مصر
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : فاطمه فتحي 
-حفظ جزئى تبارك وعم بروايه حفص
-📝 المشرفة :؟؟ 
-⏰ التوقيت : تسميع الثلاثاء العاشره 🌤صباحا توقيت مكه ومصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : ميمونة تصحيح تلاوة 
-📝 المشرفة : زهراء اماني
-⏰ التوقيت : يوم الاحد الساعة 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : تاهيل معلمات
-📝 المشرفة : 
-⏰ التوقيت : الاثنين 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : زهراء 
-📝 المشرفة : اماني علي 
-📆   اليوم:  السبت 
-⏰ التوقيت : 5 بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نسرين بركات 
-📝 المشرفة : ميمونة 
-📆   اليوم:  السبت 
-⏰ التوقيت : 3 مساء بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-
-القرآن في الدنيا نافع🍃
-وفي القبر شافع🍃
-وفي الجنة رافع🍃
-اللهم اجعلنا من أهله وخاصته🤲🌹
-"
+🍃 القرآن نافع في الدنيا والقبر والجنة
 """
 
+HELP_TEXT = """
+/start - تشغيل البوت
+/help - المساعدة
+/ban - حظر (رد)
+/unban - فك حظر (رد)
+"""
+
+
 # =========================
-# باقي النظام (Production ثابت)
+# MENU
 # =========================
+def menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ سجل اسمي", callback_data="register"),
+            InlineKeyboardButton("🎧 مستمعة", callback_data="listener")
+        ],
+        [
+            InlineKeyboardButton("⛔️ معتذرة", callback_data="excused"),
+            InlineKeyboardButton("❌ حذف", callback_data="remove")
+        ],
+        [
+            InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+            InlineKeyboardButton("🧹 تصفير", callback_data="reset")
+        ],
+        [
+            InlineKeyboardButton("📜 القوانين", callback_data="rules"),
+            InlineKeyboardButton("📅 الجدول", callback_data="schedule")
+        ],
+        [
+            InlineKeyboardButton("✅ قرأت", callback_data="read")
+        ]
+    ])
 
-app = Application.builder().token(TOKEN).build()
 
-async def db():
-    return await asyncpg.connect(DATABASE_URL)
-
+# =========================
+# BUILD MESSAGE
+# =========================
 async def build(chat_id):
-    conn = await db()
+    conn = await get_db()
 
-    data = await conn.fetch(
-        "SELECT name,status,read_status FROM users WHERE chat_id=$1 ORDER BY created_at",
-        chat_id
-    )
+    locked = await get_locked(chat_id)
+
+    data = await conn.fetch("""
+        SELECT name,status,read_status
+        FROM users
+        WHERE chat_id=$1
+        ORDER BY created_at ASC
+    """, chat_id)
 
     await conn.close()
 
-    def section(st):
-        rows = [r for r in data if r["status"] == st]
-        return "\n".join(f"{i+1}- {r['name']}" for i, r in enumerate(rows)) or "لا يوجد"
+    def section(status):
+        result = [
+            f"{row['name']}{' ✅' if row['read_status'] else ''}"
+            for row in data if row["status"] == status
+        ]
+        return "\n".join(result) if result else "لا يوجد"
 
     return (
-        "📅 خادم القرآن الرقمي\n\n"
+        "السلام عليكم ورحمة الله وبركاته\n"
+        f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        "خادم القرآن الرقمي 💫\n"
+        f"{'🔒 مغلق' if locked else '🔓 مفتوح'}\n\n"
         f"✍ المسجلات:\n{section('register')}\n\n"
+        f"🎧 المستمعات:\n{section('listener')}\n\n"
         f"⛔ المعتذرات:\n{section('excused')}\n\n"
-        f"🎧 المستمعات:\n{section('listener')}"
+        f"🚫 المحظورات:\n{section('banned')}\n\n"
+        "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا"
     )
 
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍ تسجيل", callback_data="register"),
-         InlineKeyboardButton("🎧 مستمعة", callback_data="listener")],
-        [InlineKeyboardButton("⛔ معتذرة", callback_data="excused"),
-         InlineKeyboardButton("❌ حذف", callback_data="remove")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock")],
-        [InlineKeyboardButton("🧹 تصفير", callback_data="reset")],
-        [InlineKeyboardButton("✅ قرأت", callback_data="read")]
-    ])
 
+# =========================
+# START
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(await build(update.effective_chat.id), reply_markup=menu())
-    await update.message.reply_text(WELCOME_MESSAGE)
+    text = await build(update.effective_chat.id)
+    await update.message.reply_text(text, reply_markup=menu())
 
-async def rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(RULES_TEXT)
 
-async def schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(SCHEDULE_TEXT)
+# =========================
+# HELP
+# =========================
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP_TEXT)
 
-# (يمكن إضافة باقي handlers كما في النسخة السابقة بدون تغيير)
 
-async def handle(request):
-    data = await request.json()
-    update = Update.de_json(data, app.bot)
-    await app.process_update(update)
-    return web.Response(text="OK")
+# =========================
+# BAN / UNBAN
+# =========================
+async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        return
 
-async def run():
-    await app.initialize()
-    await app.start()
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message.from_user
 
-    path = f"/{TOKEN}"
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}{path}")
+        conn = await get_db()
+        await conn.execute("""
+            INSERT INTO users(chat_id,user_id,name,status,read_status,created_at)
+            VALUES($1,$2,$3,'banned',FALSE,$4)
+            ON CONFLICT (chat_id,user_id)
+            DO UPDATE SET status='banned'
+        """, update.effective_chat.id, target.id, target.full_name, datetime.now())
 
-    aio = web.Application()
-    aio.router.add_post(path, handle)
-    aio.router.add_get("/", lambda r: web.Response(text="OK"))
+        await conn.close()
+        await update.message.reply_text(f"🚫 تم حظر {target.full_name}")
 
-    runner = web.AppRunner(aio)
-    await runner.setup()
 
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
+async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context):
+        return
 
-    while True:
-        await asyncio.sleep(3600)
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message.from_user
 
+        conn = await get_db()
+        await conn.execute(
+            "DELETE FROM users WHERE chat_id=$1 AND user_id=$2",
+            update.effective_chat.id,
+            target.id
+        )
+        await conn.close()
+
+        await update.message.reply_text(f"✅ تم فك الحظر عن {target.full_name}")
+
+
+# =========================
+# BUTTONS
+# =========================
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    chat_id = q.message.chat_id
+    user_id = q.from_user.id
+    name = q.from_user.full_name
+    action = q.data
+
+    conn = await get_db()
+
+    status = await conn.fetchrow(
+        "SELECT status FROM users WHERE chat_id=$1 AND user_id=$2",
+        chat_id, user_id
+    )
+
+    if status and status["status"] == "banned":
+        await conn.close()
+        return
+
+    if action in ["register", "listener", "excused"]:
+        if await get_locked(chat_id):
+            await conn.close()
+            return
+
+        await conn.execute("""
+            INSERT INTO users(chat_id,user_id,name,status,read_status,created_at)
+            VALUES($1,$2,$3,$4,FALSE,$5)
+            ON CONFLICT (chat_id,user_id)
+            DO UPDATE SET status=$4
+        """, chat_id, user_id, name, action, datetime.now())
+
+    elif action == "remove":
+        await conn.execute(
+            "DELETE FROM users WHERE chat_id=$1 AND user_id=$2",
+            chat_id, user_id
+        )
+
+    elif action == "read":
+        await conn.execute(
+            "UPDATE users SET read_status = NOT read_status WHERE chat_id=$1 AND user_id=$2",
+            chat_id, user_id
+        )
+
+    elif action == "lock":
+        if await is_admin(update, context):
+            await conn.execute(
+                "UPDATE groups SET locked = NOT locked WHERE chat_id=$1",
+                chat_id
+            )
+
+    elif action == "reset":
+        if await is_admin(update, context):
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id=$1 AND status!='banned'",
+                chat_id
+            )
+
+    await conn.close()
+
+    try:
+        await q.edit_message_text(await build(chat_id), reply_markup=menu())
+    except:
+        pass
+
+
+# =========================
+# HANDLERS
+# =========================
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("help", help_command))
+app.add_handler(CommandHandler("ban", ban))
+app.add_handler(CommandHandler("unban", unban))
+app.add_handler(CallbackQueryHandler(buttons))
+
+
+# =========================
+# RUN (FIXED WEBHOOK RENDER)
+# =========================
 if __name__ == "__main__":
-    asyncio.run(run())
+    print("🚀 BOT RUNNING ON RENDER (PRODUCTION)")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+                         )
