@@ -1,4 +1,4 @@
- import os
+import os
 import logging
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -8,9 +8,9 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 # CONFIG
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = os.getenv("BASE_URL")  # رابط Render https://xxxx.onrender.com
+BASE_URL = os.getenv("BASE_URL")  # https://your-app.onrender.com
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
-WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
+WEBHOOK_URL = f"{BASE_URL}{WEBHOOK_PATH}"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,12 +20,12 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # =========================
-# BOT SETUP
+# TELEGRAM APP
 # =========================
 application = Application.builder().token(TOKEN).build()
 
 # =========================
-# HANDLERS
+# START COMMAND
 # =========================
 async def start(update: Update, context):
     keyboard = [
@@ -38,7 +38,9 @@ async def start(update: Update, context):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
+# =========================
+# CALLBACK BUTTONS
+# =========================
 async def buttons(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -53,13 +55,14 @@ async def buttons(update: Update, context):
             "📅 الجدول:\n- تحديثات يومية\n- محتوى مستمر"
         )
 
-
-# تسجيل الهاندلرز
+# =========================
+# REGISTER HANDLERS
+# =========================
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(buttons))
 
 # =========================
-# WEBHOOK ROUTE
+# WEBHOOK ENDPOINT
 # =========================
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
@@ -68,24 +71,31 @@ def webhook():
     application.process_update(update)
     return "OK"
 
-
-# فحص السيرفر
+# =========================
+# HEALTH CHECK (Render)
+# =========================
 @app.route("/")
 def home():
     return "Bot is running via Webhook ✅"
 
+# =========================
+# SETUP WEBHOOK (ON START)
+# =========================
+def set_webhook():
+    import requests
+    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
+    requests.get(url, params={"url": WEBHOOK_URL})
+    logging.info(f"Webhook set to: {WEBHOOK_URL}")
 
 # =========================
-# SET WEBHOOK ON START
+# INIT BOT
 # =========================
-@app.before_first_request
-def setup_webhook():
-    logging.info(f"Setting webhook: {WEBHOOK_URL}")
-    application.bot.set_webhook(url=WEBHOOK_URL)
-
+with application:
+    application.initialize()
+    set_webhook()
 
 # =========================
-# RUN
+# RUN SERVER
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
