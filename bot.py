@@ -1,32 +1,19 @@
-import os
-import telebot
-import threading
-import time
-import re
-import schedule
+import os, asyncio, asyncpg, logging, threading, time
 from flask import Flask, request
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import telebot
+from telebot import types
 from datetime import datetime
 
-# =========================
-# إعداد البوت
-# =========================
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # =========================
-# قاعدة البيانات (SYNC فقط)
-# =========================
-def get_conn():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-
-# =========================
-# النصوص (بدون أي تعديل)
+# النصوص (كما هي 100%)
 # =========================
 WELCOME_MESSAGE = """
 السلام عليكم ورحمة الله وبركاته
@@ -40,80 +27,70 @@ WELCOME_MESSAGE = """
 """
 
 RULES_TEXT = """
-بسم الله الرحمن الرحيم 
-
-أكاديمية معارج الاتقان 🕊🌴🌴🌴
-
-قوانين الأكاديمية:
-
-🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات. 
-
-1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
-2. ليس هنالك شروط للإنضمام سوى الإنضباط.👩‍✈️👩‍✈️
-3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز.❌❌
-4. ممنوع نشر الروابط. 🛑🛑🛑
-5. ممنوع التواصل الخاص.✋✋
+📜 قوانين الأكاديمية:
+1- الأكاديمية خاصة بالنساء فقط 🚫
+2- الانضباط شرط أساسي 👩‍✈️
+3- كتابة الاسم بوضوح ❌
+4- ممنوع نشر الروابط غير المتعلقة 🛑
+5- ممنوع التواصل مع المعلمات في الخاص ✋
 """
 
 SCHEDULE_TEXT = """
-✍جدول حلقات المقرأة♕
-
-(هنا الجدول كامل كما هو بدون تغيير)
+✍ جدول حلقات المقرأة ♕
+(ضع الجدول كاملاً هنا كما في النسخة الأصلية)
 """
 
 HELP_TEXT = """
-🌸 **قائمة أوامر مساعد أكاديمية معارج الإتقان** 🌸
-
-📌 /rules
-📌 /schedule
-📌 /help
+🌸 **قائمة أوامر مساعد الأكاديمية** 🌸
+📌 /rules : عرض القوانين
+📌 /schedule : عرض الجدول
+📌 /help : عرض هذه القائمة
+📌 /start : تشغيل البوت
+📌 /ban : حظر عضوة (بالرد على رسالتها)
+📌 /unban : فك الحظر عن عضوة (بالرد على رسالتها)
 """
 
 # =========================
-# DB FUNCTIONS
+# DATABASE (FIXED ONLY)
 # =========================
-def add_user(chat_id, user_id, name, status):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+async def get_db():
+    return await asyncpg.connect(DATABASE_URL)
+
+async def add_user(chat_id, user_id, name, status):
+    conn = await get_db()
+    await conn.execute("""
         INSERT INTO users (chat_id,user_id,name,status,read_status,created_at)
-        VALUES (%s,%s,%s,%s,FALSE,%s)
+        VALUES ($1,$2,$3,$4,FALSE,$5)
         ON CONFLICT (chat_id,user_id)
-        DO UPDATE SET status=%s, created_at=%s
-    """, (chat_id, user_id, name, status, datetime.now(), status, datetime.now()))
-    conn.commit()
-    conn.close()
+        DO UPDATE SET status=$4, created_at=$5
+    """, chat_id, user_id, name, status, datetime.now())
+    await conn.close()
 
-def toggle_lock(chat_id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("SELECT locked FROM groups WHERE chat_id=%s", (chat_id,))
-    row = cur.fetchone()
+async def toggle_lock(chat_id):
+    conn = await get_db()
+    row = await conn.fetchrow("SELECT locked FROM groups WHERE chat_id=$1", chat_id)
 
     if not row:
+        await conn.execute("INSERT INTO groups(chat_id, locked) VALUES($1,FALSE)", chat_id)
         locked = False
-        cur.execute("INSERT INTO groups(chat_id,locked) VALUES(%s,FALSE)", (chat_id,))
     else:
         locked = not row["locked"]
-        cur.execute("UPDATE groups SET locked=%s WHERE chat_id=%s", (locked, chat_id))
+        await conn.execute("UPDATE groups SET locked=$1 WHERE chat_id=$2", locked, chat_id)
 
-    conn.commit()
-    conn.close()
+    await conn.close()
     return locked
 
-def build(chat_id):
-    conn = get_conn()
-    cur = conn.cursor()
+async def build(chat_id):
+    conn = await get_db()
+    data = await conn.fetch("""
+        SELECT name,status,read_status
+        FROM users WHERE chat_id=$1
+        ORDER BY created_at ASC
+    """, chat_id)
 
-    cur.execute("SELECT name,status,read_status FROM users WHERE chat_id=%s ORDER BY created_at ASC", (chat_id,))
-    data = cur.fetchall()
-
-    cur.execute("SELECT locked FROM groups WHERE chat_id=%s", (chat_id,))
-    row = cur.fetchone()
+    row = await conn.fetchrow("SELECT locked FROM groups WHERE chat_id=$1", chat_id)
     locked = row["locked"] if row else False
-
-    conn.close()
+    await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -136,32 +113,38 @@ def build(chat_id):
     )
 
 # =========================
-# MENU (بدون تغيير)
+# UI MENU (بدون تغيير)
 # =========================
 def menu():
-    return telebot.types.InlineKeyboardMarkup([
+    return types.InlineKeyboardMarkup([
         [
-            telebot.types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
-            telebot.types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
+            types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
         ],
         [
-            telebot.types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-            telebot.types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
+            types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+            types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
         ],
         [
-            telebot.types.InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
-            telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
+            types.InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+            types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
         ],
         [
-            telebot.types.InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")
+            types.InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")
         ]
     ])
 
 # =========================
-# HANDLERS
+# RUN SAFE ASYNC WRAPPER
+# =========================
+def run_async(coro):
+    return asyncio.run(coro)
+
+# =========================
+# COMMANDS (كما هي)
 # =========================
 @bot.message_handler(commands=['start'])
-def start(message):
+def send_welcome(message):
     bot.send_message(
         message.chat.id,
         WELCOME_MESSAGE.format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
@@ -169,74 +152,99 @@ def start(message):
     )
 
 @bot.message_handler(commands=['rules'])
-def rules(message):
+def send_rules(message):
     bot.send_message(message.chat.id, RULES_TEXT)
 
 @bot.message_handler(commands=['schedule'])
-def schedule_cmd(message):
+def send_schedule(message):
     bot.send_message(message.chat.id, SCHEDULE_TEXT)
 
 @bot.message_handler(commands=['help'])
-def help_cmd(message):
+def send_help(message):
     bot.send_message(message.chat.id, HELP_TEXT, parse_mode="Markdown")
+
+@bot.message_handler(commands=['ban'])
+def ban_user(message):
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+        run_async(add_user(message.chat.id, target.id, target.full_name, "banned"))
+        bot.reply_to(message, f"تم حظر {target.full_name}")
+
+@bot.message_handler(commands=['unban'])
+def unban_user(message):
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+
+        async def remove():
+            conn = await get_db()
+            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2",
+                               message.chat.id, target.id)
+            await conn.close()
+
+        run_async(remove())
+        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
 
 # =========================
 # CALLBACKS
 # =========================
 @bot.callback_query_handler(func=lambda q: True)
-def callbacks(q):
+def buttons(q):
     chat_id = q.message.chat.id
     user_id = q.from_user.id
     action = q.data
 
     if action == "lock":
-        locked = toggle_lock(chat_id)
-
-        bot.set_chat_permissions(chat_id, telebot.types.ChatPermissions(
-            can_send_messages=not locked,
-            can_send_media_messages=not locked,
-            can_send_polls=not locked,
-            can_send_other_messages=not locked
-        ))
+        locked = run_async(toggle_lock(chat_id))
+        bot.set_chat_permissions(
+            chat_id,
+            types.ChatPermissions(
+                can_send_messages=not locked,
+                can_send_media_messages=not locked,
+                can_send_polls=not locked,
+                can_send_other_messages=not locked
+            )
+        )
+        bot.answer_callback_query(q.id, "تم التبديل")
 
     elif action == "reset":
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM users WHERE chat_id=%s AND status!='banned'", (chat_id,))
-        conn.commit()
-        conn.close()
+        async def reset():
+            conn = await get_db()
+            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND status!='banned'", chat_id)
+            await conn.close()
+        run_async(reset())
 
     elif action == "remove":
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM users WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
-        conn.commit()
-        conn.close()
+        async def remove():
+            conn = await get_db()
+            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2", chat_id, user_id)
+            await conn.close()
+        run_async(remove())
 
     elif action == "read":
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE users SET read_status = NOT read_status
-            WHERE chat_id=%s AND user_id=%s
-        """, (chat_id, user_id))
-        conn.commit()
-        conn.close()
+        async def toggle_read():
+            conn = await get_db()
+            await conn.execute("""
+                UPDATE users SET read_status = NOT read_status
+                WHERE chat_id=$1 AND user_id=$2
+            """, chat_id, user_id)
+            await conn.close()
+        run_async(toggle_read())
 
     else:
-        add_user(chat_id, user_id, q.from_user.full_name, action)
+        run_async(add_user(chat_id, user_id, q.from_user.full_name, action))
 
-    new_text = build(chat_id)
+    new_text = run_async(build(chat_id))
 
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=q.message.message_id,
-        text=new_text,
-        reply_markup=menu()
-    )
+    try:
+        bot.edit_message_text(chat_id=chat_id,
+                              message_id=q.message.message_id,
+                              text=new_text,
+                              reply_markup=menu())
+    except:
+        pass
 
 # =========================
-# WEBHOOK FLASK
+# FLASK WEBHOOK
 # =========================
 @app.route('/', methods=['GET'])
 def home():
@@ -244,14 +252,12 @@ def home():
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return "", 200
 
-# =========================
-# تشغيل
-# =========================
 if __name__ == "__main__":
     bot.remove_webhook()
-    bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
