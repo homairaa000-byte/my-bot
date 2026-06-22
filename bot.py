@@ -1,56 +1,92 @@
-import os
+ import os
 import logging
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
-
-from handlers.start import start
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 # =========================
-# SETTINGS
+# CONFIG
 # =========================
+TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = os.getenv("BASE_URL")  # رابط Render https://xxxx.onrender.com
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
+
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = os.getenv("BOT_TOKEN")
-
+# =========================
+# FLASK APP
+# =========================
+app = Flask(__name__)
 
 # =========================
-# START BUTTON HANDLER
+# BOT SETUP
 # =========================
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+application = Application.builder().token(TOKEN).build()
+
+# =========================
+# HANDLERS
+# =========================
+async def start(update: Update, context):
+    keyboard = [
+        [InlineKeyboardButton("📜 القوانين", callback_data="rules")],
+        [InlineKeyboardButton("📅 الجدول", callback_data="schedule")]
+    ]
+
+    await update.message.reply_text(
+        "👋 أهلاً بك في البوت",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def buttons(update: Update, context):
     query = update.callback_query
     await query.answer()
 
     if query.data == "rules":
-        await query.edit_message_text("📜 القوانين سيتم إضافتها قريبًا")
+        await query.edit_message_text(
+            "📜 القوانين:\n- احترام الجميع\n- عدم السب\n- الالتزام"
+        )
 
     elif query.data == "schedule":
-        await query.edit_message_text("📅 الجدول سيتم إضافته قريبًا")
+        await query.edit_message_text(
+            "📅 الجدول:\n- تحديثات يومية\n- محتوى مستمر"
+        )
 
-    elif query.data == "welcome":
-        await query.edit_message_text("🌿 أهلاً بك في الأكاديمية")
+
+# تسجيل الهاندلرز
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(buttons))
+
+# =========================
+# WEBHOOK ROUTE
+# =========================
+@app.route(WEBHOOK_PATH, methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    application.process_update(update)
+    return "OK"
+
+
+# فحص السيرفر
+@app.route("/")
+def home():
+    return "Bot is running via Webhook ✅"
 
 
 # =========================
-# MAIN
+# SET WEBHOOK ON START
 # =========================
-def main():
-    app = Application.builder().token(TOKEN).build()
-
-    # أوامر
-    app.add_handler(CommandHandler("start", start))
-
-    # أزرار
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    print("Bot is running...")
-
-    app.run_polling(drop_pending_updates=True)
+@app.before_first_request
+def setup_webhook():
+    logging.info(f"Setting webhook: {WEBHOOK_URL}")
+    application.bot.set_webhook(url=WEBHOOK_URL)
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
-    main()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
