@@ -1,4 +1,4 @@
-import os, asyncio, asyncpg, logging, threading, time
+import os, asyncio, asyncpg, logging, threading
 from flask import Flask, request
 import telebot
 from telebot import types
@@ -13,7 +13,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # =========================
-# النصوص (كما هي 100%)
+# النصوص الثابتة (كما هي بدون أي تعديل)
 # =========================
 WELCOME_MESSAGE = """
 السلام عليكم ورحمة الله وبركاته
@@ -51,7 +51,7 @@ HELP_TEXT = """
 """
 
 # =========================
-# DATABASE (FIXED ONLY)
+# DB
 # =========================
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
@@ -71,10 +71,10 @@ async def toggle_lock(chat_id):
     row = await conn.fetchrow("SELECT locked FROM groups WHERE chat_id=$1", chat_id)
 
     if not row:
-        await conn.execute("INSERT INTO groups(chat_id, locked) VALUES($1,FALSE)", chat_id)
+        await conn.execute("INSERT INTO groups(chat_id, locked) VALUES($1, FALSE)", chat_id)
         locked = False
     else:
-        locked = not row["locked"]
+        locked = not row['locked']
         await conn.execute("UPDATE groups SET locked=$1 WHERE chat_id=$2", locked, chat_id)
 
     await conn.close()
@@ -82,21 +82,24 @@ async def toggle_lock(chat_id):
 
 async def build(chat_id):
     conn = await get_db()
-    data = await conn.fetch("""
-        SELECT name,status,read_status
-        FROM users WHERE chat_id=$1
-        ORDER BY created_at ASC
-    """, chat_id)
 
+    data = await conn.fetch(
+        "SELECT name,status,read_status FROM users WHERE chat_id=$1 ORDER BY created_at ASC",
+        chat_id
+    )
     row = await conn.fetchrow("SELECT locked FROM groups WHERE chat_id=$1", chat_id)
-    locked = row["locked"] if row else False
+    locked = row['locked'] if row else False
+
     await conn.close()
 
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def section(status):
-        result = [f"{r['name']}{' ✅' if r['read_status'] else ''}" for r in data if r['status'] == status]
+        result = [
+            f"{r['name']}{' ✅' if r['read_status'] else ''}"
+            for r in data if r['status'] == status
+        ]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(result)) if result else "لا يوجد"
 
     return (
@@ -113,7 +116,7 @@ async def build(chat_id):
     )
 
 # =========================
-# UI MENU (بدون تغيير)
+# menu (بدون تغيير شكل)
 # =========================
 def menu():
     return types.InlineKeyboardMarkup([
@@ -135,100 +138,92 @@ def menu():
     ])
 
 # =========================
-# RUN SAFE ASYNC WRAPPER
+# helpers async bridge
 # =========================
 def run_async(coro):
     return asyncio.run(coro)
 
 # =========================
-# COMMANDS (كما هي)
+# handlers (telebot)
 # =========================
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.send_message(
-        message.chat.id,
-        WELCOME_MESSAGE.format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        reply_markup=menu()
-    )
+def start(m):
+    text = WELCOME_MESSAGE.format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    bot.send_message(m.chat.id, text, reply_markup=menu())
 
 @bot.message_handler(commands=['rules'])
-def send_rules(message):
-    bot.send_message(message.chat.id, RULES_TEXT)
+def rules(m):
+    bot.send_message(m.chat.id, RULES_TEXT)
 
 @bot.message_handler(commands=['schedule'])
-def send_schedule(message):
-    bot.send_message(message.chat.id, SCHEDULE_TEXT)
+def schedule(m):
+    bot.send_message(m.chat.id, SCHEDULE_TEXT)
 
 @bot.message_handler(commands=['help'])
-def send_help(message):
-    bot.send_message(message.chat.id, HELP_TEXT, parse_mode="Markdown")
+def help_cmd(m):
+    bot.send_message(m.chat.id, HELP_TEXT, parse_mode="Markdown")
 
 @bot.message_handler(commands=['ban'])
-def ban_user(message):
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-        run_async(add_user(message.chat.id, target.id, target.full_name, "banned"))
-        bot.reply_to(message, f"تم حظر {target.full_name}")
+def ban(m):
+    if m.reply_to_message:
+        u = m.reply_to_message.from_user
+        run_async(add_user(m.chat.id, u.id, u.full_name, "banned"))
+        bot.reply_to(m, f"تم حظر {u.full_name}")
 
 @bot.message_handler(commands=['unban'])
-def unban_user(message):
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
+def unban(m):
+    if m.reply_to_message:
+        u = m.reply_to_message.from_user
 
-        async def remove():
+        async def task():
             conn = await get_db()
-            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2",
-                               message.chat.id, target.id)
+            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2", m.chat.id, u.id)
             await conn.close()
 
-        run_async(remove())
-        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
+        run_async(task())
+        bot.reply_to(m, f"تم فك الحظر عن {u.full_name}")
 
 # =========================
-# CALLBACKS
+# buttons (FIXED ONLY LOGIC)
 # =========================
 @bot.callback_query_handler(func=lambda q: True)
-def buttons(q):
+def cb(q):
     chat_id = q.message.chat.id
     user_id = q.from_user.id
     action = q.data
 
     if action == "lock":
         locked = run_async(toggle_lock(chat_id))
-        bot.set_chat_permissions(
-            chat_id,
-            types.ChatPermissions(
-                can_send_messages=not locked,
-                can_send_media_messages=not locked,
-                can_send_polls=not locked,
-                can_send_other_messages=not locked
-            )
-        )
-        bot.answer_callback_query(q.id, "تم التبديل")
+        bot.set_chat_permissions(chat_id, types.ChatPermissions(
+            can_send_messages=not locked,
+            can_send_media_messages=not locked,
+            can_send_polls=not locked,
+            can_send_other_messages=not locked
+        ))
 
     elif action == "reset":
-        async def reset():
+        async def task():
             conn = await get_db()
             await conn.execute("DELETE FROM users WHERE chat_id=$1 AND status!='banned'", chat_id)
             await conn.close()
-        run_async(reset())
+        run_async(task())
 
     elif action == "remove":
-        async def remove():
+        async def task():
             conn = await get_db()
             await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2", chat_id, user_id)
             await conn.close()
-        run_async(remove())
+        run_async(task())
 
     elif action == "read":
-        async def toggle_read():
+        async def task():
             conn = await get_db()
-            await conn.execute("""
-                UPDATE users SET read_status = NOT read_status
-                WHERE chat_id=$1 AND user_id=$2
-            """, chat_id, user_id)
+            await conn.execute(
+                "UPDATE users SET read_status = NOT read_status WHERE chat_id=$1 AND user_id=$2",
+                chat_id, user_id
+            )
             await conn.close()
-        run_async(toggle_read())
+        run_async(task())
 
     else:
         run_async(add_user(chat_id, user_id, q.from_user.full_name, action))
@@ -236,17 +231,19 @@ def buttons(q):
     new_text = run_async(build(chat_id))
 
     try:
-        bot.edit_message_text(chat_id=chat_id,
-                              message_id=q.message.message_id,
-                              text=new_text,
-                              reply_markup=menu())
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=q.message.message_id,
+            text=new_text,
+            reply_markup=menu()
+        )
     except:
         pass
 
 # =========================
-# FLASK WEBHOOK
+# Flask webhook (FIX Render)
 # =========================
-@app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def home():
     return "OK", 200
 
@@ -255,9 +252,14 @@ def webhook():
     json_str = request.get_data().decode("utf-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
-    return "", 200
+    return "OK", 200
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
