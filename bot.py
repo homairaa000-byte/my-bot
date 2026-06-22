@@ -7,22 +7,22 @@ import schedule
 import logging
 from datetime import datetime
 from flask import Flask, request
-
 import telebot
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # =========================
 # SETTINGS
 # =========================
 
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
 # =========================
-# SQLITE
+# DATABASE (SQLite)
 # =========================
 
 DB = "bot.db"
@@ -56,129 +56,7 @@ def init_db():
 init_db()
 
 # =========================
-# BOT 1 (نظام التسجيل)
-# =========================
-
-bot_app = Application.builder().token(TOKEN).build()
-
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    try:
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-    except:
-        return False
-
-def get_locked(chat_id):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("INSERT OR IGNORE INTO groups(chat_id,locked) VALUES(?,0)", (chat_id,))
-    conn.commit()
-
-    c.execute("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
-    row = c.fetchone()
-    conn.close()
-
-    return row[0] if row else 0
-
-# =========================
-# 📌 قائمة التسجيل (مكملة بالكامل)
-# =========================
-
-def build(chat_id):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    locked = get_locked(chat_id)
-
-    c.execute("SELECT name,status,read_status FROM users WHERE chat_id=?", (chat_id,))
-    data = c.fetchall()
-    conn.close()
-
-    status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    def section(status):
-        result = [f"{r[0]}{' ✅' if r[2] else ''}" for r in data if r[1] == status]
-        return "\n".join(result) if result else "لا يوجد"
-
-    return (
-        "السلام عليكم ورحمة الله وبركاته\n"
-        f"📅 {date_str}\n\n"
-        "خادم القرآن الرقمي 💫\n"
-        f"{status_text}\n"
-        "قائمة تسجيل الأدوار 📝\n\n"
-        f"✍️ المسجلات:\n{section('register')}\n\n"
-        f"⛔️ المعتذرات:\n{section('excused')}\n\n"
-        f"🎧 المستمعات:\n{section('listener')}\n\n"
-        f"🚫 المحظورات:\n{section('banned')}\n\n"
-        "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ"
-    )
-
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
-         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
-        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
-        [InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
-         InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")],
-        [InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")]
-    ])
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update, context):
-        return
-    await update.message.reply_text(build(update.effective_chat.id), reply_markup=menu())
-
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    chat_id = q.message.chat_id
-    user_id = q.from_user.id
-    action = q.data
-
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    if action in ["register", "listener", "excused"]:
-        c.execute("""
-        INSERT OR REPLACE INTO users(chat_id,user_id,name,status,read_status,created_at)
-        VALUES(?,?,?,?,0,?)
-        """, (chat_id, user_id, q.from_user.full_name, action, datetime.now()))
-
-    elif action == "read":
-        c.execute("""
-        UPDATE users SET read_status = 1-read_status
-        WHERE chat_id=? AND user_id=?
-        """, (chat_id, user_id))
-
-    elif action == "remove":
-        c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-
-    conn.commit()
-    conn.close()
-
-    try:
-        await q.edit_message_text(build(chat_id), reply_markup=menu())
-    except:
-        pass
-
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(buttons))
-
-# =========================
-# BOT 2 (النصوص كاملة بدون أي حذف)
-# =========================
-
-bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
-
-# =========================
-# 🔥 النصوص كاملة 100%
+# النصوص (كما هي 100%)
 # =========================
 
 WARNING_MESSAGE = "عذراً أختي الكريمة، الأكاديمية مخصصة للنساء فقط، يرجى التأكد من أن الاسم صريح وواضح (بدون رموز أو حرف واحد)."
@@ -190,10 +68,6 @@ WELCOME_MESSAGE = """
 أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
 يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
 """
-
-# =========================
-# 📚 الجدول (بدون تكرار - كامل)
-# =========================
 
 SCHEDULE_TEXT = """
 " ✍جدول حلقات المقرأة♕
@@ -255,12 +129,30 @@ SCHEDULE_TEXT = """
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : نسمه طه تصحيح جزئى تبارك وعم 
 📝 المشرفة : 
-⏰ التوقيت : الخميس ٤م توقيت مصر 
+⏰ التوقيت : الخميس ٤م توقيت مصر
 ❀❀❀❀❀❀❀❀❀❀❀
 💐 المعلمة : فاطمه فتحي 
 حفظ جزئى تبارك وعم بروايه حفص
-📝 المشرفة : ؟؟
-⏰ التوقيت : الثلاثاء العاشرة صباحا
+📝 المشرفة :؟؟ 
+⏰ التوقيت : تسميع الثلاثاء العاشره 🌤صباحا توقيت مكه ومصر 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : ميمونة تصحيح تلاوة 
+📝 المشرفة : زهراء اماني
+⏰ التوقيت : يوم الاحد الساعة 2 توقيت مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : تاهيل معلمات
+📝 المشرفة : 
+⏰ التوقيت : الاثنين 2 توقيت مكة 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : زهراء 
+📝 المشرفة : اماني علي 
+📆 اليوم: السبت 
+⏰ التوقيت : 5 بتوقيت مصر 
+❀❀❀❀❀❀❀❀❀❀❀
+💐 المعلمة : نسرين بركات 
+📝 المشرفة : ميمونة 
+📆 اليوم: السبت 
+⏰ التوقيت : 3 مساء بتوقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
 
 القرآن في الدنيا نافع🍃
@@ -268,10 +160,6 @@ SCHEDULE_TEXT = """
 وفي الجنة رافع🍃
 اللهم اجعلنا من أهله وخاصته🤲🌹
 """
-
-# =========================
-# 📜 القوانين (كاملة)
-# =========================
 
 RULES_TEXT = """
 بسم الله الرحمن الرحيم 
@@ -286,13 +174,17 @@ RULES_TEXT = """
 
 2. ليس هنالك شروط للإنضمام للأكاديمية سوى الإنضباط.👩‍✈️👩‍✈️
 
-3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز.❌❌
+3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
 
-4. مجموعات الحفظ بروايه قالون و حفص تعمل حسب الجداول.
+4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي.
 
-5. ممنوع نشر الروابط.
+5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي.
 
-6. ممنوع التواصل الخاص.
+6. ليس لدينا مجموعات حفظ برواية ورش بعد.
+
+7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية.
+
+8. ممنوع التواصل مع المعلمات في الخاص.
 
 💐 شاكرين حسن تعاونكن 🤍
 """
@@ -310,7 +202,29 @@ HELP_TEXT = """
 """
 
 # =========================
-# WEBHOOK + HANDLERS
+# GROUP STORAGE
+# =========================
+
+def save_group(chat_id):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO groups(chat_id,locked) VALUES(?,0)", (chat_id,))
+    conn.commit()
+    conn.close()
+
+# =========================
+# WELCOME DELETE AFTER 5 MIN
+# =========================
+
+def auto_delete(chat_id, message_id):
+    time.sleep(300)
+    try:
+        bot.delete_message(chat_id, message_id)
+    except:
+        pass
+
+# =========================
+# WEBHOOK
 # =========================
 
 @app.route("/")
@@ -323,9 +237,14 @@ def webhook():
     bot.process_new_updates([update])
     return "OK"
 
+# =========================
+# COMMANDS
+# =========================
+
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🌸 أهلاً بكِ في الأكاديمية 🌸")
+    save_group(message.chat.id)
+    bot.send_message(message.chat.id, "🌸 قائمة التسجيل 📝", reply_markup=menu())
 
 @bot.message_handler(commands=['schedule'])
 def schedule_cmd(message):
@@ -339,10 +258,53 @@ def rules_cmd(message):
 def help_cmd(message):
     bot.send_message(message.chat.id, HELP_TEXT)
 
+# =========================
+# MENU (التسجيل)
+# =========================
+
+def menu():
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ قرأت", callback_data="read"),
+         InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")],
+        [InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+         InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")],
+        [InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")]
+    ])
+
+# =========================
+# CALLBACKS
+# =========================
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle(call):
+    bot.answer_callback_query(call.id)
+
+    if call.data == "register":
+        bot.send_message(call.message.chat.id, "تم تسجيلك ✍️")
+
+    elif call.data == "listener":
+        bot.send_message(call.message.chat.id, "تم تسجيلك كمستمعة 🎧")
+
+    elif call.data == "excused":
+        bot.send_message(call.message.chat.id, "تم تسجيلك كمعتذرة ⛔️")
+
+    elif call.data == "remove":
+        bot.send_message(call.message.chat.id, "تم حذف اسمك ❌")
+
+# =========================
+# WELCOME MESSAGE (GROUP ONLY)
+# =========================
+
 @bot.message_handler(content_types=["new_chat_members"])
 def welcome(message):
     for u in message.new_chat_members:
-        bot.send_message(message.chat.id, f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}")
+        msg = bot.send_message(
+            message.chat.id,
+            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
+        )
+        threading.Thread(target=auto_delete, args=(message.chat.id, msg.message_id)).start()
 
 # =========================
 # RUN
