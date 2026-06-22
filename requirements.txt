@@ -1,4 +1,5 @@
-python-telegram-bot==22.1
 pyTelegramBotAPI
-Flask
+flask
+asyncpg
+psycopg2-binary
 schedule
