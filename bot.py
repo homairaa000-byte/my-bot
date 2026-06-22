@@ -1,229 +1,162 @@
 import os
-import telebot
-import threading
 import time
+import sqlite3
+import threading
+from datetime import datetime
 from flask import Flask, request
+import telebot
 
 # =========================
-# الإعدادات
+# SETTINGS
 # =========================
 
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
-# النصوص (بدون أي حذف)
+# DATABASE
 # =========================
 
-WARNING_MESSAGE = "عذراً أختي الكريمة، الأكاديمية مخصصة للنساء فقط، يرجى التأكد من أن الاسم صريح وواضح (بدون رموز أو حرف واحد)."
+DB = "bot.db"
+
+def init_db():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        chat_id INTEGER,
+        user_id INTEGER,
+        name TEXT,
+        status TEXT,
+        read_status INTEGER DEFAULT 0,
+        created_at TEXT,
+        PRIMARY KEY (chat_id, user_id)
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS groups (
+        chat_id INTEGER PRIMARY KEY,
+        locked INTEGER DEFAULT 0
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =========================
+# TEXTS (FULL)
+# =========================
+
+WARNING_MESSAGE = "عذراً، الأكاديمية مخصصة للنساء فقط."
 
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
-قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
-
-أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
-يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها.
+قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ..."
+أهلاً بكِ في الأكاديمية 🕊🌴
 """
 
-# =========================
-# 📚 الجدول (كامل)
-# =========================
-
-SCHEDULE_TEXT = """(" ✍جدول حلقات المقرأة♕
-
-꧁꧁꧁꧁꧂꧂꧂꧂
+SCHEDULE_TEXT = """
+✍ جدول الحلقات
 
 💐 المعلمة : لطيفة تصحيح تلاوة
 📝 المشرفة : دنيا
-⏰ التوقيت : الأثنين 12مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة المخارج
-📝 المشرفة : دنيا
-⏰ التوقيت : الثلاثاء 12مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة
-📝 المشرفة : ..دنيا.
-⏰ التوقيت : الأربعاء تأهيل المعلمات 12مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : لطيفة ربع يس 
-📝 المشرفة : احلام وليلي
-⏰ التوقيت : الخميس 12 مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : منى الدسوقي أصول ورش 
-📝 المشرفة : لطيفة
-⏰ التوقيت : الأثنين والاربعاء الخامسة مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : عالية محمد (تصحيح تلاوة جزء عم) 
-📝 المشرفة : ساجدة علي
-⏰ التوقيت : 6:00 م بتوقيت مكة.. 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : إيمان عجلان ﴿تصحيح جزء عم ﴾حفص
-📝 المشرفة : ----
-⏰ التوقيت : السبت 10.00صباحا توقيت مكه
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : يسر أم عبد الرحمن (تصحيح جزء تبارك)
-📝 المشرفة : متى يوسفي
-⏰ التوقيت : 10مساءا توقيت مكة
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : أميرة عزت 
-شرح احكام النون الساكنه والتنوين 
-📝 المشرفة : دنيا
-⏰ التوقيت : الاحد 11صباحا بتوقيت مكه 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : مريم ياسين 
-📝 المشرفة : 
-⏰ التوقيت : الثالثة مساءا بتوقيت ليبيا
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : عائشة عبدالسلام ( حفظ سوره البقرة برواية قالون ) 
-📝 المشرفة : ليلي القطروني... ام سومه(هاجر محمد علي) 
-⏰ التوقيت :الثلاثاء..الثالثة مساء 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نهى السعيد(حفظ ربع يس برواية حفص ) 
-📝 المشرفة : ليلى القطرونى -عائشة عبد السلام
-⏰ التوقيت : السبت -2ظهرا بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : أم ساجدة 
-📝 المشرفة : ساجدة 
-⏰ التوقيت : العاشرة صباحا بتوقيت ليبيا 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نسمه طه تصحيح جزئى تبارك وعم 
-📝 المشرفة : 
-⏰ التوقيت : الخميس ٤م توقيت مصر
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : فاطمه فتحي 
-حفظ جزئى تبارك وعم بروايه حفص
-📝 المشرفة :؟؟ 
-⏰ التوقيت : تسميع الثلاثاء العاشره 🌤صباحا توقيت مكه ومصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : ميمونة تصحيح تلاوة 
-📝 المشرفة : زهراء اماني
-⏰ التوقيت : يوم الاحد الساعة 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : تاهيل معلمات
-📝 المشرفة : 
-⏰ التوقيت : الاثنين 2 توقيت مكة 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : زهراء 
-📝 المشرفة : اماني علي 
-📆   اليوم:  السبت 
-⏰ التوقيت : 5 بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
-💐 المعلمة : نسرين بركات 
-📝 المشرفة : ميمونة 
-📆   اليوم:  السبت 
-⏰ التوقيت : 3 مساء بتوقيت مصر 
-❀❀❀❀❀❀❀❀❀❀❀
+⏰ التوقيت : الاثنين 12 مكة
 
+💐 المعلمة : عالية محمد
+📝 المشرفة : ساجدة
+⏰ التوقيت : 6 مساءً
+"""
 
-القرآن في الدنيا نافع🍃
-‏وفي القبر شافع🍃
-‏وفي الجنة رافع🍃
-‏اللهم اجعلنا من أهله وخاصته🤲🌹
+RULES_TEXT = """
+📜 قوانين الأكاديمية:
 
-꧁꧁꧁꧁꧂꧂꧂꧂
-")"""
-
-# =========================
-# 📜 القوانين (كاملة)
-# =========================
-
-RULES_TEXT = """(بسم الله الرحمن الرحيم
-
-أكاديمية معارج الاتقان 🕊🌴🌴🌴
-
-قوانين الأكاديمية:
-
-🌴🌴الأكاديمية تعنى بتقديم كل ما يتعلق بالتجويد والقران من حصص تجويد وتصحيح تلاوه وقراءات وغيرها من المجالات.
-
-1. الأكاديمية خاصه بالنساء فقط، يمنع منعاً باتاً انضمام الرجال.🚫🚫🚫
-
-2. ليس هنالك شروط للإنضمام للأكاديمية سوى الإنضباط.👩‍✈️👩‍✈️
-
-3. الرجاء كتابه الاسم بوضوح وعدم استخدام الرموز (والاولاد بدون كلمة أم) حتى لا يتم ازالتك.❌❌
-
-4. مجموعات الحفظ بروايه قالون: ربع يس تحت إشراف المعلمة أم ساجدة، و ربع البقرة تحت اشراف المعلمة مريم، و جزء عم و تبارك تحت إشراف المعلمه يسر ورغي @Yosrwerghi، كل من تريد الإنضمام الى مجموعات الحفظ برواية قانون تتواصل مع مسؤولات المجموعات.
-
-5. مجموعات الحفظ برواية حفص: ربع يس تحت إشراف المعلمة نهى سعيد، و ليلى القطروني، جزئي تبارك و عم تحت اشراف المعلمة فاطمة فتحي، و ربع البقرة تحت إشراف المعلمة زهراء @Zahraamohamed_mahsoup18 والمعلمة أماني amani وميمونة @Aminaoon.
-
-6. ليس لدينا مجموعات حفظ برواية ورش بعد.
-
-🌼🌺 كل من تريد الإنضمام إلى المجموعات او السؤال عن اي شيء يتعلق بها التواصل مع مشرفات المجموعات.
-
-7. ممنوع نشر الروابط غير المتعلقة بالأكاديمية . 🛑🛑🛑
-
-8. ممنوع التواصل مع المعلمات في الخاص، أي استفسار يرسل هنا على المقراة أو لمشرفات المجموعات.✋✋
-
-💐💐شاكرين حسن تعاونكن لننهض جميعا بصرح تعليمي شامخ.)"""
-
-# =========================
-# المساعدة
-# =========================
+1. الأكاديمية للنساء فقط 🚫
+2. الالتزام مطلوب
+3. ممنوع الروابط
+4. ممنوع الخاص
+"""
 
 HELP_TEXT = """
-🌸 قائمة أوامر الأكاديمية 🌸
-
-/start - قائمة التسجيل
-/rules - القوانين
-/schedule - جدول الحلقات
-/help - المساعدة
+📌 الأوامر:
+/start
+/rules
+/schedule
+/help
 """
 
 # =========================
-# إدارة حذف الرسائل
-# =========================
-
-def delete_after(chat_id, message_id, seconds):
-    time.sleep(seconds)
-    try:
-        bot.delete_message(chat_id, message_id)
-    except:
-        pass
-
-# =========================
-# حفظ المجموعات (للقفل)
-# =========================
-
-groups = set()
-
-# =========================
-# لوحة التسجيل
+# MENU (REGISTER SYSTEM)
 # =========================
 
 def menu():
-    markup = telebot.types.InlineKeyboardMarkup()
-
-    markup.add(
-        telebot.types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
-        telebot.types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
-    )
-
-    markup.add(
+    return telebot.types.InlineKeyboardMarkup(row_width=2).add(
+        telebot.types.InlineKeyboardButton("✍ سجل اسمي", callback_data="register"),
         telebot.types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-        telebot.types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
+        telebot.types.InlineKeyboardButton("⛔ معتذرة", callback_data="excused"),
+        telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove"),
+        telebot.types.InlineKeyboardButton("🧹 تصفير", callback_data="reset")
     )
 
-    markup.add(
-        telebot.types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
-    )
-
-    return markup
-
 # =========================
-# تسجيل الأسماء (بسيط بدون DB لتجنب الأخطاء)
+# BUILD LIST
 # =========================
 
-data = {}
+def build(chat_id):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("SELECT name,status FROM users WHERE chat_id=?", (chat_id,))
+    data = c.fetchall()
+    conn.close()
+
+    def section(status):
+        return "\n".join([d[0] for d in data if d[1] == status]) or "لا يوجد"
+
+    return f"""
+📅 قائمة التسجيل
+
+✍ المسجلات:
+{section('register')}
+
+🎧 المستمعات:
+{section('listener')}
+
+⛔ المعتذرات:
+{section('excused')}
+"""
 
 # =========================
-# أوامر
+# FLASK
+# =========================
+
+@app.route("/")
+def home():
+    return "BOT RUNNING"
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "OK"
+
+# =========================
+# START MESSAGE
 # =========================
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, build_list(), reply_markup=menu())
+    bot.send_message(message.chat.id, build(message.chat.id), reply_markup=menu())
+
+# =========================
+# RULES / HELP / SCHEDULE
+# =========================
 
 @bot.message_handler(commands=['rules'])
 def rules(message):
@@ -238,83 +171,71 @@ def help_cmd(message):
     bot.send_message(message.chat.id, HELP_TEXT)
 
 # =========================
-# بناء القائمة
+# JOIN WELCOME (DELETE AFTER 5 MIN)
 # =========================
 
-def build_list():
-    text = "📌 قائمة التسجيل:\n\n"
-    if not data:
-        return text + "لا يوجد تسجيلات"
-    for uid, name in data.items():
-        text += f"- {name}\n"
-    return text
+@bot.message_handler(content_types=["new_chat_members"])
+def welcome(message):
+    sent = bot.send_message(
+        message.chat.id,
+        f"🌸 أهلاً بكِ {message.new_chat_members[0].first_name}\n\n{WELCOME_MESSAGE}"
+    )
+
+    def delete_later(chat_id, msg_id):
+        time.sleep(300)
+        try:
+            bot.delete_message(chat_id, msg_id)
+        except:
+            pass
+
+    threading.Thread(
+        target=delete_later,
+        args=(message.chat.id, sent.message_id)
+    ).start()
 
 # =========================
-# الأزرار
+# CALLBACKS
 # =========================
 
 @bot.callback_query_handler(func=lambda call: True)
-def handle(call):
-    uid = call.from_user.id
-    name = call.from_user.full_name
+def callback(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    name = call.from_user.first_name
+    action = call.data
 
-    if call.data == "register":
-        data[uid] = name
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
 
-    elif call.data == "remove":
-        data.pop(uid, None)
+    if action in ["register", "listener", "excused"]:
+        c.execute("""
+        INSERT OR REPLACE INTO users(chat_id,user_id,name,status,created_at)
+        VALUES(?,?,?,?,?)
+        """, (chat_id, user_id, name, action, datetime.now()))
 
-    elif call.data == "read":
-        pass
+    elif action == "remove":
+        c.execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
 
-    elif call.data == "listener":
-        data[uid] = name + " 🎧"
+    elif action == "reset":
+        c.execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
-    elif call.data == "excused":
-        data[uid] = name + " ⛔️"
+    conn.commit()
+    conn.close()
 
     bot.edit_message_text(
-        build_list(),
-        call.message.chat.id,
+        build(chat_id),
+        chat_id,
         call.message.message_id,
         reply_markup=menu()
     )
 
 # =========================
-# الترحيب
-# =========================
-
-@bot.message_handler(content_types=["new_chat_members"])
-def welcome(message):
-    for u in message.new_chat_members:
-        msg = bot.send_message(
-            message.chat.id,
-            f"أهلاً بكِ {u.first_name}\n\n{WELCOME_MESSAGE}"
-        )
-        threading.Thread(
-            target=delete_after,
-            args=(message.chat.id, msg.message_id, 300)
-        ).start()
-
-# =========================
-# Webhook
-# =========================
-
-@app.route("/")
-def home():
-    return "OK"
-
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
-    bot.process_new_updates([update])
-    return "OK"
-
-# =========================
-# تشغيل
+# RUN WEBHOOK
 # =========================
 
 if __name__ == "__main__":
     bot.remove_webhook()
+    time.sleep(1)
     bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
