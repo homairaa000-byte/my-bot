@@ -152,19 +152,6 @@ def callback(call):
     try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
     except: pass
 
-@bot.message_handler(content_types=['new_chat_members'])
-def welcome_new(message):
-    for member in message.new_chat_members:
-        msg = bot.reply_to(message, f"أهلاً بكِ {member.full_name} في أكاديمية معارج الإتقان 🕊")
-        threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
-    try: bot.delete_message(message.chat.id, message.message_id)
-    except: pass
-
-@bot.message_handler(content_types=['left_chat_member'])
-def delete_left(message):
-    try: bot.delete_message(message.chat.id, message.message_id)
-    except: pass
-
 @bot.message_handler(commands=['ban', 'unban'])
 def manage_bans(message):
     if not is_admin(message.chat.id, message.from_user.id): return
@@ -177,12 +164,30 @@ def manage_bans(message):
     else:
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (message.chat.id, target.id))
         bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
+    
+    # تحديث القائمة بعد الحظر
+    try:
+        bot.send_message(message.chat.id, build_list(message.chat.id), reply_markup=get_menu())
+    except: pass
 
 @bot.message_handler(commands=['start'])
 def start(m):
     if not is_admin(m.chat.id, m.from_user.id): return
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
+
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_new(message):
+    for member in message.new_chat_members:
+        msg = bot.reply_to(message, f"أهلاً بكِ {member.full_name} في أكاديمية معارج الإتقان 🕊")
+        threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+
+@bot.message_handler(content_types=['left_chat_member'])
+def delete_left(message):
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
 
 @bot.message_handler(commands=['rules'])
 def rules(m): bot.send_message(m.chat.id, RULES_TEXT)
@@ -199,4 +204,3 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
