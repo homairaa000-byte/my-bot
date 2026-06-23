@@ -12,7 +12,11 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# --- إضافة استجابة للمسار الرئيسي لمراقب الموقع ---
+# --- دالة الحذف التلقائي ---
+def safe_delete(chat_id, message_id):
+    try: bot.delete_message(chat_id, message_id)
+    except: pass
+
 @app.route("/", methods=["GET"])
 def index():
     return "البوت يعمل بنجاح!", 200
@@ -127,7 +131,7 @@ def is_admin(chat_id, user_id):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-    bot.answer_callback_query(call.id) # إضافة سريعة لتسريع الأزرار
+    bot.answer_callback_query(call.id)
     chat_id, user_id, action = call.message.chat.id, call.from_user.id, call.data
     if action in ["lock", "reset"] and not is_admin(chat_id, user_id):
         return
@@ -155,6 +159,17 @@ def start(m):
     if not is_admin(m.chat.id, m.from_user.id): return
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
+
+# --- الدوال المضافة ---
+@bot.message_handler(commands=['rules'])
+def rules(m):
+    safe_delete(m.chat.id, m.message_id)
+    bot.send_message(m.chat.id, RULES_TEXT)
+
+@bot.message_handler(commands=['schedule'])
+def schedule(m):
+    safe_delete(m.chat.id, m.message_id)
+    bot.send_message(m.chat.id, SCHEDULE_TEXT)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
