@@ -165,10 +165,11 @@ def start(m):
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
     for member in m.new_chat_members:
+        username_display = f"(@{member.username})" if member.username else ""
         welcome_text = (
             f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
             f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
-            f"أهلاً بكِ يا {member.full_name} في أكاديمية معارج الاتقان! 🕊\n"
+            f"أهلاً بكِ يا {member.full_name} {username_display} في أكاديمية معارج الاتقان! 🕊\n"
             f"يرجى قراءة القوانين في المثبتة."
         )
         sent_msg = bot.send_message(m.chat.id, welcome_text)
