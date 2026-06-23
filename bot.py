@@ -39,12 +39,6 @@ def db_fetch(query, params=()):
     return data
 
 # --- النصوص المعتمدة ---
-WELCOME_MESSAGE = """مرحبا مرحبا بوصية رسول الله...
-قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
-
-أهلاً بكِ في أكاديمية معارج الإتقان 🕊🌴🌴🌴
-يرجى قراءة قوانين الأكاديمية المثبتة والالتزام بها."""
-
 SCHEDULE_TEXT = """ ✍جدول حلقات المقرأة♕
 ꧁꧁꧁꧁꧂꧂꧂꧂
 💐 المعلمة : لطيفة تصحيح تلاوة | المشرفة : دنيا | التوقيت : الأثنين 12مكة
@@ -132,25 +126,29 @@ def callback(call):
     if action in ["lock", "reset"] and not is_admin(chat_id, user_id):
         bot.answer_callback_query(call.id, "❌ هذه الصلاحية للمشرفات فقط!")
         return
-    locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))[0][0]
-    if locked and action in ["register", "listener", "excused"]:
-        bot.answer_callback_query(call.id, "🔒 التسجيل مغلق حالياً!")
-        return
-    is_banned = db_fetch("SELECT status FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (chat_id, user_id))
-    if is_banned and action in ["register", "listener", "excused"]:
-        bot.answer_callback_query(call.id, "🚫 أنتِ محظورة من التسجيل!")
-        return
-    if action in ["register", "listener", "excused"]:
+    
+    if action == "reset":
+        db_execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
+        bot.answer_callback_query(call.id, "🧹 تم تصفير القائمة بالكامل")
+    elif action == "lock":
+        db_execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
+    
+    elif action in ["register", "listener", "excused"]:
+        locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))[0][0]
+        if locked:
+            bot.answer_callback_query(call.id, "🔒 التسجيل مغلق حالياً!")
+            return
+        is_banned = db_fetch("SELECT status FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (chat_id, user_id))
+        if is_banned:
+            bot.answer_callback_query(call.id, "🚫 أنتِ محظورة من التسجيل!")
+            return
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'", (chat_id, user_id))
         db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (chat_id, user_id, call.from_user.full_name, action, False))
     elif action == "read":
         db_execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'", (chat_id, user_id))
-    elif action == "reset":
-        db_execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
-    elif action == "lock":
-        db_execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
+        
     try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
     except: pass
 
@@ -182,6 +180,7 @@ def manage_bans(message):
 
 @bot.message_handler(commands=['start'])
 def start(m):
+    if not is_admin(m.chat.id, m.from_user.id): return
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
