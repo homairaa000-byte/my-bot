@@ -177,16 +177,19 @@ def start(m):
 
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new(message):
+    # حذف رسالة النظام التلقائية الخاصة بتنبيه الانضمام
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+    
     for member in message.new_chat_members:
         mention = f"[{member.full_name}](tg://user?id={member.id})"
         welcome_text = (f"مرحبا مرحبا بوصية رسول الله...\n"
                         f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم\". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.\n\n"
                         f"أهلاً بكِ {mention} في أكاديمية معارج الإتقان 🕊🌴🌴🌴")
         
-        msg = bot.reply_to(message, welcome_text, parse_mode="Markdown")
+        # إرسال رسالة الترحيب وحذفها بعد 300 ثانية (5 دقائق)
+        msg = bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
         threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
-    try: bot.delete_message(message.chat.id, message.message_id)
-    except: pass
 
 @bot.message_handler(content_types=['left_chat_member'])
 def delete_left(message):
