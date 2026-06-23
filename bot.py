@@ -1,23 +1,45 @@
 import os
 import telebot
+import sqlite3
 import threading
 import time
-import asyncio
-import asyncpg
-import logging
 from flask import Flask, request
 from telebot import types
 from datetime import datetime
-import schedule
 
 # إعدادات البيئة
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+
+# --- تهيئة قاعدة البيانات المحلية ---
+def init_db():
+    conn = sqlite3.connect('data.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (chat_id INTEGER, user_id INTEGER, name TEXT, status TEXT, read_status BOOLEAN, created_at TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY, locked BOOLEAN)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def db_execute(query, params=()):
+    conn = sqlite3.connect('data.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute(query, params)
+    conn.commit()
+    conn.close()
+
+def db_fetch(query, params=()):
+    conn = sqlite3.connect('data.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute(query, params)
+    data = c.fetchall()
+    conn.close()
+    return data
 
 # --- النصوص المعتمدة ---
 WELCOME_MESSAGE = """
@@ -76,34 +98,19 @@ HELP_TEXT = """
 📌 /unban : لفك الحظر (بالرد على رسالتها).
 """
 
-# --- منطق قاعدة البيانات ---
-def run_async(coro): return asyncio.run(coro)
-
-async def get_db(): return await asyncpg.connect(DATABASE_URL)
-
-async def add_user_db(chat_id, user_id, name, status):
-    conn = await get_db()
-    await conn.execute("""INSERT INTO users (chat_id,user_id,name,status,read_status,created_at)
-        VALUES ($1,$2,$3,$4,FALSE,$5) ON CONFLICT (chat_id,user_id) DO UPDATE SET status=$4, created_at=$5""", 
-        chat_id, user_id, name, status, datetime.now())
-    await conn.close()
-
-async def build_list(chat_id):
-    conn = await get_db()
-    data = await conn.fetch("SELECT name,status,read_status FROM users WHERE chat_id=$1 ORDER BY created_at ASC", chat_id)
-    row = await conn.fetchrow("SELECT locked FROM groups WHERE chat_id=$1", chat_id)
-    locked = row['locked'] if row else False
-    await conn.close()
+# --- بناء القائمة ---
+def build_list(chat_id):
+    users = db_fetch("SELECT name, status, read_status FROM users WHERE chat_id=?", (chat_id,))
+    group = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+    locked = group[0][0] if group else False
     
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     def section(s):
-        res = [f"{r['name']}{' ✅' if r['read_status'] else ''}" for r in data if r['status'] == s]
+        res = [f"{r[0]}{' ✅' if r[2] else ''}" for r in users if r[1] == s]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(res)) if res else "لا يوجد"
     
-    return (f"السلام عليكم ورحمة الله وبركاته\n📅 {date_str}\n\n"
-            f"خادم القرآن الرقمي 💫\n{status_text}\n\n📋 قائمة التسجيل:\n\n"
+    return (f"خادم القرآن الرقمي 💫\n{status_text}\n\n📋 قائمة التسجيل:\n\n"
             f"✍️ المسجلات:\n{section('register')}\n\n"
             f"⛔️ المعتذرات:\n{section('excused')}\n\n"
             f"🎧 المستمعات:\n{section('listener')}\n\n"
@@ -113,8 +120,9 @@ async def build_list(chat_id):
 # --- الهاندلرز ---
 @bot.message_handler(commands=['start'])
 def start(m):
-    text = run_async(build_list(m.chat.id))
-    bot.send_message(m.chat.id, text, reply_markup=get_menu())
+    db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
+    bot.send_message(m.chat.id, WELCOME_MESSAGE)
+    bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
 @bot.message_handler(commands=['rules'])
 def rules(m): bot.send_message(m.chat.id, RULES_TEXT)
@@ -129,54 +137,34 @@ def help_cmd(m): bot.send_message(m.chat.id, HELP_TEXT, parse_mode="Markdown")
 def ban(m):
     if m.reply_to_message:
         u = m.reply_to_message.from_user
-        run_async(add_user_db(m.chat.id, u.id, u.full_name, "banned"))
+        db_execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status) VALUES (?,?,?,?)", (m.chat.id, u.id, u.full_name, "banned"))
         bot.reply_to(m, f"تم حظر {u.full_name}")
 
 @bot.message_handler(commands=['unban'])
 def unban(m):
     if m.reply_to_message:
         u = m.reply_to_message.from_user
-        async def task():
-            conn = await get_db()
-            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2", m.chat.id, u.id)
-            await conn.close()
-        run_async(task())
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (m.chat.id, u.id))
         bot.reply_to(m, f"تم فك الحظر عن {u.full_name}")
 
 @bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    chat_id, user_id, action = call.message.chat.id, call.from_user.id, call.data
+def callback(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    action = call.data
     
-    # تنفيذ الأوامر
-    if action in ["register", "listener", "excused"]: 
-        run_async(add_user_db(chat_id, user_id, call.from_user.full_name, action))
+    if action in ["register", "listener", "excused"]:
+        db_execute("INSERT OR REPLACE INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (chat_id, user_id, call.from_user.full_name, action, False))
     elif action == "read":
-        async def task():
-            conn = await get_db()
-            await conn.execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=$1 AND user_id=$2", chat_id, user_id)
-            await conn.close()
-        run_async(task())
+        db_execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
-        async def task():
-            conn = await get_db()
-            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND user_id=$2", chat_id, user_id)
-            await conn.close()
-        run_async(task())
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "reset":
-        async def task():
-            conn = await get_db()
-            await conn.execute("DELETE FROM users WHERE chat_id=$1 AND status!='banned'", chat_id)
-            await conn.close()
-        run_async(task())
+        db_execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
     elif action == "lock":
-        async def task():
-            conn = await get_db()
-            await conn.execute("UPDATE groups SET locked = NOT locked WHERE chat_id=$1", chat_id)
-            await conn.close()
-        run_async(task())
-        
-    new_text = run_async(build_list(chat_id))
-    try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=new_text, reply_markup=get_menu())
+        db_execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
+    
+    try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
     except: pass
 
 def get_menu():
