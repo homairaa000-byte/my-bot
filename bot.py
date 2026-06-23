@@ -161,18 +161,23 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- دالة الترحيب ---
+# --- دالة الترحيب المعدلة ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
     for member in m.new_chat_members:
-        username_display = f"(@{member.username})" if member.username else ""
+        # استخدام التوجيه المباشر (Mention) لبروفايل العضو
+        user_mention = f"[{member.first_name}](tg://user?id={member.id})"
+        
         welcome_text = (
             f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
             f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
-            f"أهلاً بكِ يا {member.full_name} {username_display} في أكاديمية معارج الاتقان! 🕊\n"
+            f"أهلاً بكِ يا {user_mention} في أكاديمية معارج الاتقان! 🕊\n"
             f"يرجى قراءة القوانين في المثبتة."
         )
-        sent_msg = bot.send_message(m.chat.id, welcome_text)
+        # إرسال الرسالة مع تفعيل parse_mode="Markdown" ليعمل التوجيه
+        sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
+        
+        # ضبط توقيت الحذف (300 ثانية = 5 دقائق)
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
 # --- الأوامر المضافة ---
