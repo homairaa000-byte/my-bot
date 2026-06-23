@@ -157,10 +157,11 @@ def callback(call):
 @bot.message_handler(commands=['start'])
 def start(m):
     if not is_admin(m.chat.id, m.from_user.id): return
+    safe_delete(m.chat.id, m.message_id)
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- الدوال المضافة ---
+# --- الأوامر المضافة ---
 @bot.message_handler(commands=['rules'])
 def rules(m):
     safe_delete(m.chat.id, m.message_id)
@@ -171,11 +172,28 @@ def schedule(m):
     safe_delete(m.chat.id, m.message_id)
     bot.send_message(m.chat.id, SCHEDULE_TEXT)
 
-# --- دالة النسخ الاحتياطي ---
+@bot.message_handler(commands=['ban'])
+def ban_user(m):
+    if not is_admin(m.chat.id, m.from_user.id): return
+    safe_delete(m.chat.id, m.message_id)
+    if m.reply_to_message:
+        target = m.reply_to_message.from_user
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (m.chat.id, target.id))
+        db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (m.chat.id, target.id, target.full_name, 'banned', False))
+        bot.send_message(m.chat.id, f"✅ تم حظر: {target.full_name}")
+
+@bot.message_handler(commands=['unban'])
+def unban_user(m):
+    if not is_admin(m.chat.id, m.from_user.id): return
+    safe_delete(m.chat.id, m.message_id)
+    if m.reply_to_message:
+        target = m.reply_to_message.from_user
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (m.chat.id, target.id))
+        bot.send_message(m.chat.id, f"✅ تم فك الحظر عن: {target.full_name}")
+
 @bot.message_handler(commands=['backup'])
 def backup_db(m):
-    if m.from_user.id != 1942624918:
-        return
+    if m.from_user.id != 1942624918: return
     try:
         with open('data.db', 'rb') as db_file:
             bot.send_document(m.chat.id, db_file, caption="نسخة احتياطية لقاعدة البيانات")
