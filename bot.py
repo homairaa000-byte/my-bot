@@ -1,7 +1,6 @@
 import os
 import telebot
 import sqlite3
-import threading
 from flask import Flask, request
 from telebot import types
 from datetime import datetime
@@ -49,7 +48,9 @@ WELCOME_MESSAGE = """
 
 SCHEDULE_TEXT = """
  ✍جدول حلقات المقرأة♕
+
 ꧁꧁꧁꧁꧂꧂꧂꧂
+
 💐 المعلمة : لطيفة تصحيح تلاوة
 📝 المشرفة : دنيا
 ⏰ التوقيت : الأثنين 12مكة
@@ -130,10 +131,12 @@ SCHEDULE_TEXT = """
 📆   اليوم:  السبت 
 ⏰ التوقيت : 3 مساء بتوقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
+
 القرآن في الدنيا نافع🍃
 ‏وفي القبر شافع🍃
 ‏وفي الجنة رافع🍃
 ‏اللهم اجعلنا من أهله وخاصته🤲🌹
+
 ꧁꧁꧁꧁꧂꧂꧂꧂
 """
 
@@ -154,7 +157,7 @@ RULES_TEXT = """
 💐💐شاكرين حسن تعاونكن لننهض جميعا بصرح تعليمي شامخ.
 """
 
-# --- القائمة المحدثة بالترتيب المطلوب ---
+# --- القائمة المحدثة ---
 def build_list(chat_id):
     users = db_fetch("SELECT name, status, read_status FROM users WHERE chat_id=?", (chat_id,))
     group = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
@@ -166,14 +169,13 @@ def build_list(chat_id):
         res = [f"{r[0]}{' ✅' if r[2] else ''}" for r in users if r[1] == s]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(res)) if res else "لا يوجد"
     
-    # الترتيب: السلام، ثم العنوان، ثم القائمة، ثم الآية
-    return (f"السلام عليكم ورحمة الله وبركاته\n\n"
+    return (f"السلام عليكم ورحمة الله وبركاته\n"
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"خادم القرآن الرقمي 💫\n{status_text}\n\n📋 قائمة التسجيل:\n\n"
             f"✍️ المسجلات:\n{section('register')}\n\n"
             f"⛔️ المعتذرات:\n{section('excused')}\n\n"
             f"🎧 المستمعات:\n{section('listener')}\n\n"
             f"🚫 المحظورات:\n{section('banned')}\n\n"
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
 def get_menu():
@@ -188,19 +190,45 @@ def get_menu():
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     chat_id, user_id, action = call.message.chat.id, call.from_user.id, call.data
+    
+    # التحقق من الحظر
+    is_banned = db_fetch("SELECT status FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (chat_id, user_id))
+    if is_banned and action in ["register", "listener", "excused"]:
+        bot.answer_callback_query(call.id, "عذراً، أنتِ محظورة من التسجيل!")
+        return
+
     if action in ["register", "listener", "excused"]:
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'", (chat_id, user_id))
         db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (chat_id, user_id, call.from_user.full_name, action, False))
     elif action == "read":
         db_execute("UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?", (chat_id, user_id))
     elif action == "remove":
-        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'", (chat_id, user_id))
     elif action == "reset":
         db_execute("DELETE FROM users WHERE chat_id=? AND status != 'banned'", (chat_id,))
     elif action == "lock":
         db_execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
     
     try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
+    except: pass
+
+@bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
+def clean_chat(message):
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+
+@bot.message_handler(commands=['ban', 'unban'])
+def manage_bans(message):
+    if not message.reply_to_message: return
+    target = message.reply_to_message.from_user
+    if message.text.startswith('/ban'):
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (message.chat.id, target.id))
+        db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (message.chat.id, target.id, target.full_name, "banned", False))
+        bot.reply_to(message, f"تم حظر {target.full_name} من التسجيل.")
+    else:
+        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (message.chat.id, target.id))
+        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}.")
+    try: bot.edit_message_text(chat_id=message.chat.id, message_id=bot.send_message(message.chat.id, build_list(message.chat.id), reply_markup=get_menu()).message_id - 1, text=build_list(message.chat.id), reply_markup=get_menu())
     except: pass
 
 @bot.message_handler(commands=['start'])
@@ -214,14 +242,6 @@ def rules(m): bot.send_message(m.chat.id, RULES_TEXT)
 
 @bot.message_handler(commands=['schedule'])
 def schedule(m): bot.send_message(m.chat.id, SCHEDULE_TEXT)
-
-@bot.message_handler(func=lambda m: True)
-def filter_msg(m):
-    try:
-        if bot.get_chat_member(m.chat.id, m.from_user.id).status not in ["administrator", "creator"]:
-            if any(x in (m.text or m.caption or "").lower() for x in ["http", "t.me", "wa.me"]):
-                bot.delete_message(m.chat.id, m.message_id)
-    except: pass
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
