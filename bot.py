@@ -161,6 +161,14 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
+# --- دالة الترحيب ---
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_new_member(m):
+    for member in m.new_chat_members:
+        welcome_text = f"أهلاً بكِ يا {member.full_name} في أكاديمية معارج الاتقان! 🕊\nيرجى قراءة القوانين في المثبتة."
+        sent_msg = bot.send_message(m.chat.id, welcome_text)
+        threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
+
 # --- الأوامر المضافة ---
 @bot.message_handler(commands=['rules'])
 def rules(m):
