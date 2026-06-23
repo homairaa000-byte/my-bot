@@ -12,6 +12,11 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# --- إضافة استجابة للمسار الرئيسي لمراقب الموقع ---
+@app.route("/", methods=["GET"])
+def index():
+    return "البوت يعمل بنجاح!", 200
+
 # --- تهيئة قاعدة البيانات ---
 def init_db():
     conn = sqlite3.connect('data.db', check_same_thread=False)
@@ -122,26 +127,19 @@ def is_admin(chat_id, user_id):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
+    bot.answer_callback_query(call.id) # إضافة سريعة لتسريع الأزرار
     chat_id, user_id, action = call.message.chat.id, call.from_user.id, call.data
     if action in ["lock", "reset"] and not is_admin(chat_id, user_id):
-        bot.answer_callback_query(call.id, "❌ هذه الصلاحية للمشرفات فقط!")
         return
     
     if action == "reset":
         db_execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
-        bot.answer_callback_query(call.id, "🧹 تم تصفير القائمة بالكامل")
     elif action == "lock":
         db_execute("UPDATE groups SET locked = NOT locked WHERE chat_id=?", (chat_id,))
     
     elif action in ["register", "listener", "excused"]:
-        locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))[0][0]
-        if locked:
-            bot.answer_callback_query(call.id, "🔒 التسجيل مغلق حالياً!")
-            return
-        is_banned = db_fetch("SELECT status FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (chat_id, user_id))
-        if is_banned:
-            bot.answer_callback_query(call.id, "🚫 أنتِ محظورة من التسجيل!")
-            return
+        locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
+        if locked and locked[0][0]: return
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'", (chat_id, user_id))
         db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (chat_id, user_id, call.from_user.full_name, action, False))
     elif action == "read":
@@ -152,55 +150,11 @@ def callback(call):
     try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
     except: pass
 
-@bot.message_handler(commands=['ban', 'unban'])
-def manage_bans(message):
-    if not is_admin(message.chat.id, message.from_user.id): return
-    if not message.reply_to_message: return
-    target = message.reply_to_message.from_user
-    if message.text.startswith('/ban'):
-        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (message.chat.id, target.id))
-        db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (message.chat.id, target.id, target.full_name, "banned", False))
-        bot.reply_to(message, f"تم حظر {target.full_name}")
-    else:
-        db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (message.chat.id, target.id))
-        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
-    
-    try:
-        bot.send_message(message.chat.id, build_list(message.chat.id), reply_markup=get_menu())
-    except: pass
-
 @bot.message_handler(commands=['start'])
 def start(m):
     if not is_admin(m.chat.id, m.from_user.id): return
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
-
-@bot.message_handler(content_types=['new_chat_members'])
-def welcome_new(message):
-    # حذف رسالة النظام التلقائية الخاصة بتنبيه الانضمام
-    try: bot.delete_message(message.chat.id, message.message_id)
-    except: pass
-    
-    for member in message.new_chat_members:
-        mention = f"[{member.full_name}](tg://user?id={member.id})"
-        welcome_text = (f"مرحبا مرحبا بوصية رسول الله...\n"
-                        f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم\". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.\n\n"
-                        f"أهلاً بكِ {mention} في أكاديمية معارج الإتقان 🕊🌴🌴🌴")
-        
-        # إرسال رسالة الترحيب وحذفها بعد 300 ثانية (5 دقائق)
-        msg = bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
-        threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
-
-@bot.message_handler(content_types=['left_chat_member'])
-def delete_left(message):
-    try: bot.delete_message(message.chat.id, message.message_id)
-    except: pass
-
-@bot.message_handler(commands=['rules'])
-def rules(m): bot.send_message(m.chat.id, RULES_TEXT)
-
-@bot.message_handler(commands=['schedule'])
-def schedule(m): bot.send_message(m.chat.id, SCHEDULE_TEXT)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
