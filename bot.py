@@ -171,6 +171,17 @@ def schedule(m):
     safe_delete(m.chat.id, m.message_id)
     bot.send_message(m.chat.id, SCHEDULE_TEXT)
 
+# --- دالة النسخ الاحتياطي ---
+@bot.message_handler(commands=['backup'])
+def backup_db(m):
+    if m.from_user.id != 1942624918:
+        return
+    try:
+        with open('data.db', 'rb') as db_file:
+            bot.send_document(m.chat.id, db_file, caption="نسخة احتياطية لقاعدة البيانات")
+    except Exception as e:
+        bot.send_message(m.chat.id, f"خطأ: {e}")
+
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     bot.process_new_updates([telebot.types.Update.de_json(request.get_data().decode('utf-8'))])
