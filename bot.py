@@ -165,7 +165,6 @@ def manage_bans(message):
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (message.chat.id, target.id))
         bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
     
-    # تحديث القائمة بعد الحظر
     try:
         bot.send_message(message.chat.id, build_list(message.chat.id), reply_markup=get_menu())
     except: pass
@@ -179,7 +178,11 @@ def start(m):
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new(message):
     for member in message.new_chat_members:
-        msg = bot.reply_to(message, f"أهلاً بكِ {member.full_name} في أكاديمية معارج الإتقان 🕊")
+        welcome_text = (f"مرحبا مرحبا بوصية رسول الله...\n"
+                        f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم\". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.\n\n"
+                        f"أهلاً بكِ {member.full_name} في أكاديمية معارج الإتقان 🕊🌴🌴🌴")
+        
+        msg = bot.reply_to(message, welcome_text)
         threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
     try: bot.delete_message(message.chat.id, message.message_id)
     except: pass
@@ -204,3 +207,4 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
