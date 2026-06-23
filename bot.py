@@ -1,6 +1,8 @@
 import os
 import telebot
 import sqlite3
+import time
+import threading
 from flask import Flask, request
 from telebot import types
 from datetime import datetime
@@ -37,7 +39,7 @@ def db_fetch(query, params=()):
     conn.close()
     return data
 
-# --- النصوص المعتمدة ---
+# --- نصوص الأكاديمية (كما طلبتِ تماماً) ---
 WELCOME_MESSAGE = """
 مرحبا مرحبا بوصية رسول الله...
 قال رسول الله ﷺ: "سيأتيكُم أقوامٌ يطلبونَ العِلمَ، فإذا رأيتُموهم فقولوا لَهُم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليهِ وسلَّمَ، واقْنوهُم". قلتُ للحَكَمِ: ما اقْنوهُم؟ قالَ: علِّموهُم.
@@ -48,9 +50,7 @@ WELCOME_MESSAGE = """
 
 SCHEDULE_TEXT = """
  ✍جدول حلقات المقرأة♕
-
 ꧁꧁꧁꧁꧂꧂꧂꧂
-
 💐 المعلمة : لطيفة تصحيح تلاوة
 📝 المشرفة : دنيا
 ⏰ التوقيت : الأثنين 12مكة
@@ -131,12 +131,10 @@ SCHEDULE_TEXT = """
 📆   اليوم:  السبت 
 ⏰ التوقيت : 3 مساء بتوقيت مصر 
 ❀❀❀❀❀❀❀❀❀❀❀
-
 القرآن في الدنيا نافع🍃
 ‏وفي القبر شافع🍃
 ‏وفي الجنة رافع🍃
 ‏اللهم اجعلنا من أهله وخاصته🤲🌹
-
 ꧁꧁꧁꧁꧂꧂꧂꧂
 """
 
@@ -157,25 +155,20 @@ RULES_TEXT = """
 💐💐شاكرين حسن تعاونكن لننهض جميعا بصرح تعليمي شامخ.
 """
 
-# --- القائمة المحدثة ---
 def build_list(chat_id):
     users = db_fetch("SELECT name, status, read_status FROM users WHERE chat_id=?", (chat_id,))
     group = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
     locked = group[0][0] if group else False
-    
     status_text = "🔒 التسجيل مغلق" if locked else "🔓 التسجيل مفتوح"
     
     def section(s):
         res = [f"{r[0]}{' ✅' if r[2] else ''}" for r in users if r[1] == s]
         return "\n".join(f"{i+1}- {x}" for i, x in enumerate(res)) if res else "لا يوجد"
     
-    return (f"السلام عليكم ورحمة الله وبركاته\n"
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    return (f"السلام عليكم ورحمة الله وبركاته\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"خادم القرآن الرقمي 💫\n{status_text}\n\n📋 قائمة التسجيل:\n\n"
-            f"✍️ المسجلات:\n{section('register')}\n\n"
-            f"⛔️ المعتذرات:\n{section('excused')}\n\n"
-            f"🎧 المستمعات:\n{section('listener')}\n\n"
-            f"🚫 المحظورات:\n{section('banned')}\n\n"
+            f"✍️ المسجلات:\n{section('register')}\n\n⛔️ المعتذرات:\n{section('excused')}\n\n"
+            f"🎧 المستمعات:\n{section('listener')}\n\n🚫 المحظورات:\n{section('banned')}\n\n"
             "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا ۚ وَإِنَّ اللَّهَ لَمَعَ الْمُحْسِنِينَ")
 
 def get_menu():
@@ -186,15 +179,27 @@ def get_menu():
     markup.row(types.InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset"))
     return markup
 
-# --- الدوال والأزرار ---
+def is_admin(chat_id, user_id):
+    try: return bot.get_chat_member(chat_id, user_id).status in ['administrator', 'creator']
+    except: return False
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     chat_id, user_id, action = call.message.chat.id, call.from_user.id, call.data
     
-    # التحقق من الحظر
+    # التحقق من صلاحيات المشرفات للأزرار الإدارية
+    if action in ["lock", "reset"] and not is_admin(chat_id, user_id):
+        bot.answer_callback_query(call.id, "عذراً، هذه الصلاحية للمشرفات فقط!")
+        return
+        
+    locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))[0][0]
+    if locked and action in ["register", "listener", "excused"]:
+        bot.answer_callback_query(call.id, "عذراً، التسجيل مغلق حالياً!")
+        return
+
     is_banned = db_fetch("SELECT status FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (chat_id, user_id))
     if is_banned and action in ["register", "listener", "excused"]:
-        bot.answer_callback_query(call.id, "عذراً، أنتِ محظورة من التسجيل!")
+        bot.answer_callback_query(call.id, "أنتِ محظورة من التسجيل!")
         return
 
     if action in ["register", "listener", "excused"]:
@@ -212,24 +217,31 @@ def callback(call):
     try: bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=build_list(chat_id), reply_markup=get_menu())
     except: pass
 
-@bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
-def clean_chat(message):
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_and_delete(message):
+    for member in message.new_chat_members:
+        msg = bot.reply_to(message, f"أهلاً بكِ {member.full_name} في أكاديمية معارج الإتقان 🕊\nيُرجى قراءة القوانين /rules")
+        threading.Timer(300, lambda: bot.delete_message(message.chat.id, msg.message_id)).start()
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+
+@bot.message_handler(content_types=['left_chat_member'])
+def delete_left(message):
     try: bot.delete_message(message.chat.id, message.message_id)
     except: pass
 
 @bot.message_handler(commands=['ban', 'unban'])
 def manage_bans(message):
+    if not is_admin(message.chat.id, message.from_user.id): return
     if not message.reply_to_message: return
     target = message.reply_to_message.from_user
     if message.text.startswith('/ban'):
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=?", (message.chat.id, target.id))
         db_execute("INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)", (message.chat.id, target.id, target.full_name, "banned", False))
-        bot.reply_to(message, f"تم حظر {target.full_name} من التسجيل.")
+        bot.reply_to(message, f"تم حظر {target.full_name}")
     else:
         db_execute("DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'", (message.chat.id, target.id))
-        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}.")
-    try: bot.edit_message_text(chat_id=message.chat.id, message_id=bot.send_message(message.chat.id, build_list(message.chat.id), reply_markup=get_menu()).message_id - 1, text=build_list(message.chat.id), reply_markup=get_menu())
-    except: pass
+        bot.reply_to(message, f"تم فك الحظر عن {target.full_name}")
 
 @bot.message_handler(commands=['start'])
 def start(m):
@@ -249,7 +261,5 @@ def webhook():
     return 'OK', 200
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    bot.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
