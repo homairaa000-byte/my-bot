@@ -232,26 +232,26 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية المحدث (منع تكرار التنبيهات وحذف رسائل الانضمام النصية) ---
+# --- 4. نظام الحماية المحدث (حذف رسائل الانضمام النصية عبر الروابط + منع الروابط والأرقام) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
-    text_check = m.text or ""
-    if "انضمام" in text_check and "رابط دعوة" in text_check:
+    text_check = m.text or m.caption or ""
+    
+    # التقاط وحذف رسائل الانضمام عبر روابط الدعوة (النصية الرمادية) فوراً
+    if "انضمام" in text_check or "رابط دعوة" in text_check:
         safe_delete(m.chat.id, m.message_id)
         return
 
     if is_admin(m.chat.id, m.from_user.id):
         return
 
-    text_to_check = m.text or m.caption or ""
-    
     has_url = False
     if m.entities:
         for entity in m.entities:
             if entity.type in ['url', 'text_link']:
                 has_url = True
     
-    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_to_check))
+    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_check))
     is_forwarded = m.forward_date is not None
 
     if has_url or has_phone or is_forwarded:
