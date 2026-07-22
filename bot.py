@@ -162,9 +162,13 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- 1. دوال أحداث الانضمام والترحيب (موضوعة في المقدمة لتستجيب فوراً) ---
+# --- 1. دالة معالجة وحذف رسائل الانضمام الرمادية وإرسال الترحيب ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
+    # حذف رسالة النظام الرمادية الخاصة بالانضمام فوراً
+    safe_delete(m.chat.id, m.message_id)
+    
+    # إرسال رسالة الترحيب لكل عضو جديد انضم
     for member in m.new_chat_members:
         user_mention = f"[{member.first_name}](tg://user?id={member.id})"
         
@@ -177,7 +181,7 @@ def welcome_new_member(m):
         sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
-# --- 2. ميزة تنظيف الشات (حذف رسائل الانضمام والمغادرة والنظام) ---
+# --- 2. دالة تنظيف وحذف باقي رسائل النظام والمكالمات والمغادرة ---
 @bot.message_handler(content_types=['left_chat_member', 'group_chat_created', 'supergroup_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited'])
 def clean_system_messages(m):
     safe_delete(m.chat.id, m.message_id)
