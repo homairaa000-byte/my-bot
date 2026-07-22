@@ -232,10 +232,9 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية (يتم وضعه في النهاية) ---
+# --- 4. نظام الحماية المحدث (منع تكرار التنبيهات وحذف رسائل الانضمام النصية) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
-    # التقاط إضافي احتياطي لأي رسالة تحتوي على عبارات الانضمام الرمادية إذا تكررت
     text_check = m.text or ""
     if "انضمام" in text_check and "رابط دعوة" in text_check:
         safe_delete(m.chat.id, m.message_id)
@@ -259,15 +258,14 @@ def security_filter(m):
         safe_delete(m.chat.id, m.message_id)
         
         user_mention = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
-        
         warning_text = (
             f"⛔️ تنبيه :\n"
             f"عذرا {user_mention} إرسال روابط من دون إذن المشرفين يعرضك للحذف أو الحظر"
         )
         
         warning_msg = bot.send_message(m.chat.id, warning_text, parse_mode="Markdown")
-        
         threading.Timer(300, safe_delete, args=[m.chat.id, warning_msg.message_id]).start()
+        return
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
