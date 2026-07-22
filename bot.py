@@ -2,6 +2,7 @@ import os
 import telebot
 import sqlite3
 import threading
+import re
 from flask import Flask, request
 from telebot import types
 from datetime import datetime
@@ -47,7 +48,7 @@ def db_fetch(query, params=()):
     conn.close()
     return data
 
-# --- النصوص المعتمدة ---
+# --- النصوص المعتمدة (جداول وأحكام كاملة كما طلبتِ) ---
 SCHEDULE_TEXT = """ ✍جدول حلقات المقرأة♕
 ꧁꧁꧁꧁꧂꧂꧂꧂
 💐 المعلمة : لطيفة تصحيح تلاوة | المشرفة : دنيا | التوقيت : الأثنين 12مكة
@@ -102,7 +103,7 @@ RULES_TEXT = """بسم الله الرحمن الرحيم
 6. ممنوع التواصل مع المعلمات في الخاص، أي استفسار يرسل هنا أو للمشرفات.✋
 💐شاكرين حسن تعاونكن."""
 
-# --- الدوال الأساسية ---
+# --- الدوال الأساسية وقوائم الأزرار ---
 def build_list(chat_id):
     users = db_fetch("SELECT name, status, read_status FROM users WHERE chat_id=?", (chat_id,))
     group = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
@@ -161,11 +162,15 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- دالة الترحيب المعدلة ---
+# --- ميزة تنظيف الشات (حذف رسائل الانضمام، المغادرة، والمكالمات) ---
+@bot.message_handler(content_types=['new_chat_members', 'left_chat_member', 'video_chat_scheduled', 'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited'])
+def clean_system_messages(m):
+    safe_delete(m.chat.id, m.message_id)
+
+# --- دالة الترحيب للأعضاء الجدد ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
     for member in m.new_chat_members:
-        # استخدام التوجيه المباشر (Mention) لبروفايل العضو
         user_mention = f"[{member.first_name}](tg://user?id={member.id})"
         
         welcome_text = (
@@ -174,13 +179,42 @@ def welcome_new_member(m):
             f"أهلاً بكِ يا {user_mention} في أكاديمية معارج الاتقان! 🕊\n"
             f"يرجى قراءة القوانين في المثبتة."
         )
-        # إرسال الرسالة مع تفعيل parse_mode="Markdown" ليعمل التوجيه
         sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
-        
-        # ضبط توقيت الحذف (300 ثانية = 5 دقائق)
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
-# --- الأوامر المضافة ---
+# --- نظام الحماية (منع الروابط، التوجيه، وأرقام الهواتف) ---
+@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
+def security_filter(m):
+    if is_admin(m.chat.id, m.from_user.id):
+        return
+
+    text_to_check = m.text or m.caption or ""
+    
+    has_url = False
+    if m.entities:
+        for entity in m.entities:
+            if entity.type in ['url', 'text_link']:
+                has_url = True
+    
+    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_to_check))
+    is_forwarded = m.forward_date is not None
+
+    if has_url or has_phone or is_forwarded:
+        safe_delete(m.chat.id, m.message_id)
+        
+        user_mention = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
+        
+        warning_text = (
+            f"⛔️ تنبيه :\n"
+            f"عذرا {user_mention} إرسال روابط أو رسائل موجهة أو أرقام من دون إذن المشرفين يعرضك للحذف أو الحظر"
+        )
+        
+        warning_msg = bot.send_message(m.chat.id, warning_text, parse_mode="Markdown")
+        
+        # حذف رسالة التنبيه بعد 5 دقائق (300 ثانية)
+        threading.Timer(300, safe_delete, args=[m.chat.id, warning_msg.message_id]).start()
+
+# --- الأوامر الأساسية والإدارية ---
 @bot.message_handler(commands=['rules'])
 def rules(m):
     safe_delete(m.chat.id, m.message_id)
@@ -228,4 +262,3 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
