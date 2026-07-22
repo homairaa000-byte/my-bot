@@ -162,12 +162,7 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- ميزة تنظيف الشات (محدثة لتحذف رسائل الانضمام عبر الروابط والمغادرة بالكامل) ---
-@bot.message_handler(content_types=['new_chat_members', 'left_chat_member', 'group_chat_created', 'supergroup_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited'])
-def clean_system_messages(m):
-    safe_delete(m.chat.id, m.message_id)
-
-# --- دالة الترحيب للأعضاء الجدد ---
+# --- 1. دوال أحداث الانضمام والترحيب (موضوعة في المقدمة لتستجيب فوراً) ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
     for member in m.new_chat_members:
@@ -175,46 +170,19 @@ def welcome_new_member(m):
         
         welcome_text = (
             f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
-            f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
+            f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
             f"أهلاً بكِ يا {user_mention} في أكاديمية معارج الاتقان! 🕊\n"
-            f"يرجى قراءة القوانين في الرسائل المثبتة."
+            f"يرجى قراءة القوانين في المثبتة."
         )
         sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
-# --- نظام الحماية (منع الروابط، التوجيه، وأرقام الهواتف) ---
-@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
-def security_filter(m):
-    if is_admin(m.chat.id, m.from_user.id):
-        return
+# --- 2. ميزة تنظيف الشات (حذف رسائل الانضمام والمغادرة والنظام) ---
+@bot.message_handler(content_types=['left_chat_member', 'group_chat_created', 'supergroup_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited'])
+def clean_system_messages(m):
+    safe_delete(m.chat.id, m.message_id)
 
-    text_to_check = m.text or m.caption or ""
-    
-    has_url = False
-    if m.entities:
-        for entity in m.entities:
-            if entity.type in ['url', 'text_link']:
-                has_url = True
-    
-    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_to_check))
-    is_forwarded = m.forward_date is not None
-
-    if has_url or has_phone or is_forwarded:
-        safe_delete(m.chat.id, m.message_id)
-        
-        user_mention = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
-        
-        warning_text = (
-            f"⛔️ تنبيه :\n"
-            f"عذرا {user_mention} إرسال روابط أو رسائل موجهة أو أرقام من دون إذن المشرفين يعرضك للحذف أو الحظر"
-        )
-        
-        warning_msg = bot.send_message(m.chat.id, warning_text, parse_mode="Markdown")
-        
-        # حذف رسالة التنبيه بعد 5 دقائق (300 ثانية)
-        threading.Timer(300, safe_delete, args=[m.chat.id, warning_msg.message_id]).start()
-
-# --- الأوامر الأساسية والإدارية ---
+# --- 3. الأوامر الأساسية والإدارية ---
 @bot.message_handler(commands=['rules'])
 def rules(m):
     safe_delete(m.chat.id, m.message_id)
@@ -252,6 +220,38 @@ def backup_db(m):
             bot.send_document(m.chat.id, db_file, caption="نسخة احتياطية لقاعدة البيانات")
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
+
+# --- 4. نظام الحماية (يتم وضعه في النهاية لكي لا يعترض رسائل الانضمام أو الأوامر) ---
+@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
+def security_filter(m):
+    if is_admin(m.chat.id, m.from_user.id):
+        return
+
+    text_to_check = m.text or m.caption or ""
+    
+    has_url = False
+    if m.entities:
+        for entity in m.entities:
+            if entity.type in ['url', 'text_link']:
+                has_url = True
+    
+    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_to_check))
+    is_forwarded = m.forward_date is not None
+
+    if has_url or has_phone or is_forwarded:
+        safe_delete(m.chat.id, m.message_id)
+        
+        user_mention = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
+        
+        warning_text = (
+            f"⛔️ تنبيه :\n"
+            f"عذرا {user_mention} إرسال روابط من دون إذن المشرفين يعرضك للحذف أو الحظر"
+        )
+        
+        warning_msg = bot.send_message(m.chat.id, warning_text, parse_mode="Markdown")
+        
+        # حذف رسالة التنبيه بعد 5 دقائق (300 ثانية)
+        threading.Timer(300, safe_delete, args=[m.chat.id, warning_msg.message_id]).start()
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
