@@ -13,7 +13,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# --- دالة الحذف التلقائي ---
+# --- دالة الحذف التلقائي الآمنة ---
 def safe_delete(chat_id, message_id):
     try: bot.delete_message(chat_id, message_id)
     except: pass
@@ -162,14 +162,18 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- 1. دالة معالجة وحذف رسائل الانضمام الرمادية وإرسال الترحيب ---
+# --- 1. دالة معالجة الانضمام والترحيب (للأعضاء الحقيقيين فقط) ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
-    # حذف رسالة النظام الرمادية الخاصة بالانضمام فوراً
+    # حذف رسالة النظام الرمادية فوراً (سواء كانت لعضو جديد أو لبوت تم إضافته)
     safe_delete(m.chat.id, m.message_id)
     
-    # إرسال رسالة الترحيب لكل عضو جديد انضم
+    bot_id = bot.get_me().id
     for member in m.new_chat_members:
+        # إذا كان المنضم هو البوت الحالي أو بوت آخر، فلا نرسل له رسالة ترحيب
+        if member.id == bot_id or member.is_bot:
+            continue
+            
         user_mention = f"[{member.first_name}](tg://user?id={member.id})"
         
         welcome_text = (
@@ -181,7 +185,7 @@ def welcome_new_member(m):
         sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
-# --- 2. دالة تنظيف وحذف باقي رسائل النظام والمكالمات والمغادرة ---
+# --- 2. دالة تنظيف بقية رسائل النظام والمكالمات ---
 @bot.message_handler(content_types=['left_chat_member', 'group_chat_created', 'supergroup_chat_created', 'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited'])
 def clean_system_messages(m):
     safe_delete(m.chat.id, m.message_id)
@@ -225,7 +229,7 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية (يتم وضعه في النهاية لكي لا يعترض رسائل الانضمام أو الأوامر) ---
+# --- 4. نظام الحماية (يتم وضعه في النهاية) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
     if is_admin(m.chat.id, m.from_user.id):
@@ -254,7 +258,6 @@ def security_filter(m):
         
         warning_msg = bot.send_message(m.chat.id, warning_text, parse_mode="Markdown")
         
-        # حذف رسالة التنبيه بعد 5 دقائق (300 ثانية)
         threading.Timer(300, safe_delete, args=[m.chat.id, warning_msg.message_id]).start()
 
 @app.route(f"/{TOKEN}", methods=["POST"])
