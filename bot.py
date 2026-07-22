@@ -162,10 +162,10 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- 1. دالة معالجة الانضمام والترحيب (شاملة لرابط الدعوة والإضافات) ---
+# --- 1. دالة معالجة وحذف إشعار الانضمام التقليدي + إرسال الترحيب وحذفه بعد 5 دقائق ---
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(m):
-    safe_delete(m.chat.id, m.message_id)
+    safe_delete(m.chat.id, m.message_id) # حذف رسالة الانضمام الأصلية
     
     bot_id = bot.get_me().id
     for member in m.new_chat_members:
@@ -181,9 +181,10 @@ def welcome_new_member(m):
             f"يرجى قراءة القوانين في الرسائل المثبتة."
         )
         sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
+        # حذف رسالة الترحيب الخاصة بالبوت بعد 5 دقائق (300 ثانية)
         threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
-# --- 2. دالة تنظيف بقية رسائل النظام والمكالمات والانضمام عبر الروابط (شاملة لكل الأنواع) ---
+# --- 2. دالة تنظيف بقية رسائل النظام والمكالمات ---
 @bot.message_handler(content_types=[
     'left_chat_member', 'group_chat_created', 'supergroup_chat_created', 
     'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 
@@ -232,7 +233,7 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية المحدث (حذف رسائل الانضمام النصية عبر الروابط + منع الروابط والأرقام) ---
+# --- 4. نظام الحماية (حذف رسائل الانضمام النصية عبر الروابط + منع الروابط والأرقام) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
     text_check = m.text or m.caption or ""
