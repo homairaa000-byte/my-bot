@@ -48,7 +48,7 @@ def db_fetch(query, params=()):
     conn.close()
     return data
 
-# --- النصوص المعتمدة (جداول وأحكام كاملة كما طلبتِ) ---
+# --- النصوص المعتمدة (جداول وأحكام كاملة) ---
 SCHEDULE_TEXT = """ ✍جدول حلقات المقرأة♕
 ꧁꧁꧁꧁꧂꧂꧂꧂
 💐 المعلمة : لطيفة تصحيح تلاوة | المشرفة : دنيا | التوقيت : الأثنين 12مكة
@@ -165,7 +165,7 @@ def start(m):
 # --- 1. دالة حذف إشعارات الانضمام والإضافات فوراً + إرسال الترحيب وحذفه بعد 5 دقائق ---
 @bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
 def welcome_new_member(m):
-    safe_delete(m.chat.id, m.message_id) # حذف إشعار الانضمام أو الإضافة فوراً
+    safe_delete(m.chat.id, m.message_id) # حذف رسالة الانضمام/المغادرة الخدمية فوراً
     
     bot_id = bot.get_me().id
     if m.new_chat_members:
@@ -276,6 +276,7 @@ def webhook():
 
 if __name__ == "__main__":
     WEBHOOK_URL = "https://my-bot-nquv.onrender.com"
+    port = int(os.environ.get("PORT", 10000))
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=port)
