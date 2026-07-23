@@ -162,31 +162,32 @@ def start(m):
     db_execute("INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)", (m.chat.id, False))
     bot.send_message(m.chat.id, build_list(m.chat.id), reply_markup=get_menu())
 
-# --- 1. دالة معالجة وحذف إشعار الانضمام التقليدي + إرسال الترحيب وحذفه بعد 5 دقائق ---
-@bot.message_handler(content_types=['new_chat_members'])
+# --- 1. دالة حذف إشعارات الانضمام والإضافات فوراً + إرسال الترحيب وحذفه بعد 5 دقائق ---
+@bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
 def welcome_new_member(m):
-    safe_delete(m.chat.id, m.message_id) # حذف رسالة الانضمام الأصلية
+    safe_delete(m.chat.id, m.message_id) # حذف إشعار الانضمام أو الإضافة فوراً
     
     bot_id = bot.get_me().id
-    for member in m.new_chat_members:
-        if member.id == bot_id or member.is_bot:
-            continue
+    if m.new_chat_members:
+        for member in m.new_chat_members:
+            if member.id == bot_id or member.is_bot:
+                continue
+                
+            user_mention = f"[{member.first_name}](tg://user?id={member.id})"
             
-        user_mention = f"[{member.first_name}](tg://user?id={member.id})"
-        
-        welcome_text = (
-            f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
-            f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
-            f"أهلاً بكِ يا {user_mention} في أكاديمية معارج الاتقان! 🕊\n"
-            f"يرجى قراءة القوانين في الرسائل المثبتة."
-        )
-        sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
-        # حذف رسالة الترحيب الخاصة بالبوت بعد 5 دقائق (300 ثانية)
-        threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
+            welcome_text = (
+                f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
+                f"قال رسول الله ﷺ: \"سيأتيكُم أقوامٌ يطلبونَ العلمَ، فإذا رأيتُموهم فقولوا لَهم: مَرحبًا مَرحبًا بوصيَّةِ رسولِ اللَّهِ صلَّى اللَّهُ عليْهِ وسلَّمَ، واقْنوهُم. قلتُ لِلحَكمِ: ما اقْنوهُم؟ قالَ: علِّموهم.\"\n\n"
+                f"أهلاً بكِ يا {user_mention} في أكاديمية معارج الاتقان! 🕊\n"
+                f"يرجى قراءة القوانين في الرسائل المثبتة."
+            )
+            sent_msg = bot.send_message(m.chat.id, welcome_text, parse_mode="Markdown")
+            # حذف رسالة الترحيب الخاصة بالبوت بعد 5 دقائق (300 ثانية)
+            threading.Timer(300, safe_delete, args=[m.chat.id, sent_msg.message_id]).start()
 
 # --- 2. دالة تنظيف بقية رسائل النظام والمكالمات ---
 @bot.message_handler(content_types=[
-    'left_chat_member', 'group_chat_created', 'supergroup_chat_created', 
+    'group_chat_created', 'supergroup_chat_created', 
     'migrate_to_chat_id', 'migrate_from_chat_id', 'video_chat_scheduled', 
     'video_chat_started', 'video_chat_ended', 'video_chat_participants_invited',
     'new_chat_title', 'new_chat_photo', 'delete_chat_photo', 'pinned_message'
@@ -233,13 +234,13 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية (حذف رسائل الانضمام النصية عبر الروابط + منع الروابط والأرقام) ---
+# --- 4. نظام الحماية (حذف رسائل الانضمام النصية والإضافات + منع الروابط والأرقام) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
     text_check = m.text or m.caption or ""
     
-    # التقاط وحذف رسائل الانضمام عبر روابط الدعوة (النصية الرمادية) فوراً
-    if "انضمام" in text_check or "رابط دعوة" in text_check:
+    # التقاط وحذف أي رسالة نصية خدمة مثل "لقد قمت بإضافة..." أو "انضمام" أو "رابط دعوة"
+    if "انضمام" in text_check or "رابط دعوة" in text_check or "بإضافة" in text_check or "أضاف" in text_check:
         safe_delete(m.chat.id, m.message_id)
         return
 
