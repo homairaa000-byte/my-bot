@@ -234,9 +234,13 @@ def backup_db(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"خطأ: {e}")
 
-# --- 4. نظام الحماية (حذف رسائل الانضمام النصية والإضافات + منع الروابط والأرقام) ---
+# --- 4. نظام الحماية (مع استثناء المشرفين والمالك تماماً من الحذف) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
 def security_filter(m):
+    # استثناء المشرفين والمالك تماماً من أي عملية فحص أو حذف
+    if is_admin(m.chat.id, m.from_user.id):
+        return
+
     text_check = m.text or m.caption or ""
     
     # التقاط وحذف أي رسالة نصية خدمة مثل "لقد قمت بإضافة..." أو "انضمام" أو "رابط دعوة"
@@ -244,13 +248,10 @@ def security_filter(m):
         safe_delete(m.chat.id, m.message_id)
         return
 
-    if is_admin(m.chat.id, m.from_user.id):
-        return
-
     has_url = False
     if m.entities:
         for entity in m.entities:
-            if entity.type in ['url', 'text_link']:
+            if entity.type in ['url', 'text_link', 'mention']:
                 has_url = True
     
     has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_check))
