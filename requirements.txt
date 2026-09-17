@@ -1,4 +1,4 @@
-pyTelegramBotAPI
+pyTelegramBotAPI==4.36.1
 flask
 asyncpg
 psycopg2-binary
