@@ -3,3 +3,4 @@ flask
 asyncpg
 psycopg2-binary
 schedule
+certifi>=2026.10.19
