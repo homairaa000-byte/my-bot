@@ -617,7 +617,7 @@ def security_filter(m):
 
 
 # =========================================================
-# 5. Webhook
+# 5. Webhook المحدث
 # =========================================================
 
 @app.route(
@@ -625,14 +625,13 @@ def security_filter(m):
     methods=["POST"]
 )
 def webhook():
-
-    bot.process_new_updates([
-        telebot.types.Update.de_json(
-            request.get_data().decode('utf-8')
-        )
-    ])
-
-    return 'OK', 200
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Forbidden', 403
 
 
 # =========================================================
@@ -641,7 +640,7 @@ def webhook():
 
 if __name__ == "__main__":
 
-    WEBHOOK_URL = "https://my-bot-nquv.onrender.com"
+    WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
 
     port = int(
         os.environ.get(
