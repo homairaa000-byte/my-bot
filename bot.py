@@ -662,7 +662,8 @@ def webhook():
 
 if __name__ == "__main__":
 
-    WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
+    # الرابط الصحيح والمحدث لخدمتك الحالية على Render
+    WEBHOOK_URL = "https://my-bot-nquv.onrender.com"
 
     port = int(
         os.environ.get(
@@ -671,7 +672,8 @@ if __name__ == "__main__":
         )
     )
 
-    bot.remove_webhook()
+    # إزالة الويب هوك القديم ومسح التحديثات المعلقة لمنع تعليق البوت
+    bot.remove_webhook(drop_pending_updates=True)
 
     bot.set_webhook(
         url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}",
