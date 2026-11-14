@@ -1,3 +1,4 @@
+
 import os
 import telebot
 import sqlite3
@@ -8,8 +9,16 @@ from telebot import types
 from telebot.util import content_type_service
 from datetime import datetime
 
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+# =========================================================
+# إعدادات البوت
+# =========================================================
+
+TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+
+if not TOKEN:
+    raise ValueError("BOT_TOKEN غير موجود في متغيرات Render")
+
+WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -647,11 +656,13 @@ def security_filter(m):
     methods=["POST"]
 )
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
+
+    if request.is_json:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
+
     else:
         return 'Forbidden', 403
 
@@ -663,7 +674,7 @@ def webhook():
 if __name__ == "__main__":
 
     # الرابط الصحيح والمحدث لخدمتك الحالية على Render
-    WEBHOOK_URL = "https://my-bot-nquv.onrender.com"
+    WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
 
     port = int(
         os.environ.get(
@@ -672,21 +683,50 @@ if __name__ == "__main__":
         )
     )
 
-    # إزالة الويب هوك القديم بشكل آمن
-    bot.remove_webhook()
+    try:
 
-    # تعيين الويب هوك الجديد مع تفريغ التحديثات المعلقة داخل set_webhook
-    bot.set_webhook(
-        url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}",
-        drop_pending_updates=True,
-        allowed_updates=[
-            "message",
-            "edited_message",
-            "callback_query",
-            "my_chat_member",
-            "chat_member"
-        ]
-    )
+        # التأكد من صحة التوكن والاتصال بتليجرام
+        bot_info = bot.get_me()
+
+        print("✅ تم الاتصال بتليجرام بنجاح")
+        print(f"اسم البوت: {bot_info.username}")
+
+        # إزالة الويب هوك القديم
+        bot.remove_webhook()
+
+        print("✅ تم حذف الويب هوك السابق")
+
+        # تسجيل الويب هوك الجديد
+        webhook_result = bot.set_webhook(
+            url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}",
+            drop_pending_updates=True,
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "callback_query",
+                "my_chat_member",
+                "chat_member"
+            ]
+        )
+
+        if webhook_result:
+
+            print("✅ تم تسجيل Webhook بنجاح")
+
+            # التأكد من عنوان الويب هوك المسجل
+            webhook_info = bot.get_webhook_info()
+
+            print("عنوان Webhook:")
+            print(webhook_info.url)
+
+        else:
+
+            raise RuntimeError("فشل تسجيل Webhook")
+
+    except Exception as e:
+
+        print(f"❌ حدث خطأ أثناء تشغيل البوت: {e}")
+        raise
 
     app.run(
         host="0.0.0.0",
