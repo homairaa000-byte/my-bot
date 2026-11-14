@@ -713,19 +713,18 @@ if __name__ == "__main__":
 
             print("✅ تم تسجيل Webhook بنجاح")
 
-            # التأكد من عنوان الويب هوك المسجل
+            # التأكد من تسجيل الويب هوك دون كشف التوكن
             webhook_info = bot.get_webhook_info()
 
-            print("عنوان Webhook:")
-            print(webhook_info.url)
+            print("✅ تم التحقق من عنوان Webhook")
+            print(f"Webhook مضبوط: {bool(webhook_info.url)}")
 
         else:
 
             raise RuntimeError("فشل تسجيل Webhook")
 
-    except Exception as e:
-
-        print(f"❌ حدث خطأ أثناء تشغيل البوت: {e}")
+    except Exception:
+        print("❌ حدث خطأ أثناء تشغيل البوت أو الاتصال بتليجرام")
         raise
 
     app.run(
