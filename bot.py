@@ -1,4 +1,3 @@
-
 import os
 import telebot
 import sqlite3
@@ -118,6 +117,28 @@ RULES_TEXT = """بسم الله الرحمن الرحيم
 🤍🤍أن يكون حضور الحلقة بقصد الانتفاع بالقرآن وتعلمه وإتقانه، لا لمجرد إتمام الحضور."""
 
 
+# --- دالة التحقق من المشرفين (محدثة لدعم وضع التخفي) ---
+def is_admin(chat_id, user_id=None, message=None):
+    # إذا كانت الرسالة مرسلة بوضع التخفي (Anonymous)
+    if message is not None:
+        if message.sender_chat and message.sender_chat.id == message.chat.id:
+            return True
+        if message.from_user and message.from_user.id == 1087968824:  # GroupAnonymousBot
+            return True
+        if message.from_user:
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+
+    if not user_id:
+        return False
+
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        return member.status in ['administrator', 'creator']
+    except:
+        return False
+
+
 # --- الدوال الأساسية وقوائم الأزرار ---
 def build_list(chat_id):
     users = db_fetch(
@@ -163,62 +184,30 @@ def get_menu():
     markup = types.InlineKeyboardMarkup()
 
     markup.row(
-        types.InlineKeyboardButton(
-            "✅ قرأت",
-            callback_data="read"
-        ),
-        types.InlineKeyboardButton(
-            "✍️ سجل اسمي",
-            callback_data="register"
-        )
+        types.InlineKeyboardButton("✅ قرأت", callback_data="read"),
+        types.InlineKeyboardButton("✍️ سجل اسمي", callback_data="register")
     )
 
     markup.row(
-        types.InlineKeyboardButton(
-            "🎧 مستمعة",
-            callback_data="listener"
-        ),
-        types.InlineKeyboardButton(
-            "⛔️ معتذرة",
-            callback_data="excused"
-        )
+        types.InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
+        types.InlineKeyboardButton("⛔️ معتذرة", callback_data="excused")
     )
 
     markup.row(
-        types.InlineKeyboardButton(
-            "🔒 قفل/فتح",
-            callback_data="lock"
-        ),
-        types.InlineKeyboardButton(
-            "❌ حذف اسمي",
-            callback_data="remove"
-        )
+        types.InlineKeyboardButton("🔒 قفل/فتح", callback_data="lock"),
+        types.InlineKeyboardButton("❌ حذف اسمي", callback_data="remove")
     )
 
     markup.row(
-        types.InlineKeyboardButton(
-            "🧹 تصفير القائمة",
-            callback_data="reset"
-        )
+        types.InlineKeyboardButton("🧹 تصفير القائمة", callback_data="reset")
     )
 
     return markup
 
 
-def is_admin(chat_id, user_id):
-    try:
-        return bot.get_chat_member(
-            chat_id,
-            user_id
-        ).status in ['administrator', 'creator']
-    except:
-        return False
-
-
 # --- التعامل مع أزرار القائمة ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-
     bot.answer_callback_query(call.id)
 
     chat_id = call.message.chat.id
@@ -231,10 +220,7 @@ def callback(call):
 
     # --- تصفير القائمة ---
     if action == "reset":
-        db_execute(
-            "DELETE FROM users WHERE chat_id=?",
-            (chat_id,)
-        )
+        db_execute("DELETE FROM users WHERE chat_id=?", (chat_id,))
 
     # --- قفل / فتح التسجيل ---
     elif action == "lock":
@@ -245,48 +231,32 @@ def callback(call):
 
     # --- تسجيل / مستمعة / معتذرة ---
     elif action in ["register", "listener", "excused"]:
-
-        locked = db_fetch(
-            "SELECT locked FROM groups WHERE chat_id=?",
-            (chat_id,)
-        )
+        locked = db_fetch("SELECT locked FROM groups WHERE chat_id=?", (chat_id,))
 
         if locked and locked[0][0]:
             return
 
         db_execute(
-            "DELETE FROM users "
-            "WHERE chat_id=? AND user_id=? AND status != 'banned'",
+            "DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'",
             (chat_id, user_id)
         )
 
         db_execute(
-            "INSERT INTO users "
-            "(chat_id, user_id, name, status, read_status) "
-            "VALUES (?,?,?,?,?)",
-            (
-                chat_id,
-                user_id,
-                call.from_user.full_name,
-                action,
-                False
-            )
+            "INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)",
+            (chat_id, user_id, call.from_user.full_name, action, False)
         )
 
     # --- قرأت ---
     elif action == "read":
         db_execute(
-            "UPDATE users "
-            "SET read_status = NOT read_status "
-            "WHERE chat_id=? AND user_id=?",
+            "UPDATE users SET read_status = NOT read_status WHERE chat_id=? AND user_id=?",
             (chat_id, user_id)
         )
 
     # --- حذف الاسم ---
     elif action == "remove":
         db_execute(
-            "DELETE FROM users "
-            "WHERE chat_id=? AND user_id=? AND status != 'banned'",
+            "DELETE FROM users WHERE chat_id=? AND user_id=? AND status != 'banned'",
             (chat_id, user_id)
         )
 
@@ -305,14 +275,10 @@ def callback(call):
 # --- أمر البداية ---
 @bot.message_handler(commands=['start'])
 def start(m):
-
-    if not is_admin(m.chat.id, m.from_user.id):
+    if not is_admin(m.chat.id, m.from_user.id, message=m):
         return
 
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
+    safe_delete(m.chat.id, m.message_id)
 
     db_execute(
         "INSERT OR IGNORE INTO groups (chat_id, locked) VALUES (?, ?)",
@@ -328,38 +294,19 @@ def start(m):
 
 # =========================================================
 # 1. حذف إشعارات الانضمام والمغادرة
-#    + إرسال الترحيب وحذفه بعد 5 دقائق
 # =========================================================
 
-@bot.message_handler(
-    content_types=[
-        'new_chat_members',
-        'left_chat_member'
-    ]
-)
+@bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
 def welcome_new_member(m):
-
-    # حذف رسالة الانضمام / المغادرة الخدمية فوراً
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
-
+    safe_delete(m.chat.id, m.message_id)
     bot_id = bot.get_me().id
 
-    # إذا كان هناك أعضاء جدد
     if m.new_chat_members:
-
         for member in m.new_chat_members:
-
-            # تجاهل البوتات والبوت نفسه
             if member.id == bot_id or member.is_bot:
                 continue
 
-            user_mention = (
-                f"[{member.first_name}]"
-                f"(tg://user?id={member.id})"
-            )
+            user_mention = f"[{member.first_name}](tg://user?id={member.id})"
 
             welcome_text = (
                 f"مرحباً مرحباً بوصية رسول الله ﷺ...\n"
@@ -380,41 +327,27 @@ def welcome_new_member(m):
                 parse_mode="Markdown"
             )
 
-            # حذف رسالة الترحيب بعد 5 دقائق
             threading.Timer(
                 300,
                 safe_delete,
-                args=[
-                    m.chat.id,
-                    sent_msg.message_id
-                ]
+                args=[m.chat.id, sent_msg.message_id]
             ).start()
 
 
 # =========================================================
-# 2. حذف جميع رسائل النظام التي تدعمها المكتبة
+# 2. حذف جميع رسائل النظام
 # =========================================================
 
 SYSTEM_MESSAGE_TYPES = [
     message_type
     for message_type in content_type_service
-    if message_type not in [
-        'new_chat_members',
-        'left_chat_member'
-    ]
+    if message_type not in ['new_chat_members', 'left_chat_member']
 ]
 
 
-@bot.message_handler(
-    content_types=SYSTEM_MESSAGE_TYPES
-)
+@bot.message_handler(content_types=SYSTEM_MESSAGE_TYPES)
 def clean_system_messages(m):
-
-    # حذف رسالة النظام فوراً
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
+    safe_delete(m.chat.id, m.message_id)
 
 
 # =========================================================
@@ -423,35 +356,18 @@ def clean_system_messages(m):
 
 @bot.message_handler(commands=['rules'])
 def rules(m):
-
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
-
-    bot.send_message(
-        m.chat.id,
-        RULES_TEXT
-    )
+    safe_delete(m.chat.id, m.message_id)
+    bot.send_message(m.chat.id, RULES_TEXT)
 
 
-# --- الحظر داخل قائمة البوت فقط ---
 @bot.message_handler(commands=['ban'])
 def ban_user(m):
-
-    if not is_admin(
-        m.chat.id,
-        m.from_user.id
-    ):
+    if not is_admin(m.chat.id, m.from_user.id, message=m):
         return
 
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
+    safe_delete(m.chat.id, m.message_id)
 
     if m.reply_to_message:
-
         target = m.reply_to_message.from_user
 
         db_execute(
@@ -460,78 +376,45 @@ def ban_user(m):
         )
 
         db_execute(
-            "INSERT INTO users "
-            "(chat_id, user_id, name, status, read_status) "
-            "VALUES (?,?,?,?,?)",
-            (
-                m.chat.id,
-                target.id,
-                target.full_name,
-                'banned',
-                False
-            )
+            "INSERT INTO users (chat_id, user_id, name, status, read_status) VALUES (?,?,?,?,?)",
+            (m.chat.id, target.id, target.full_name, 'banned', False)
         )
 
-        bot.send_message(
-            m.chat.id,
-            f"✅ تم حظر: {target.full_name}"
-        )
+        bot.send_message(m.chat.id, f"✅ تم حظر: {target.full_name}")
 
 
-# --- فك الحظر من قائمة البوت فقط ---
 @bot.message_handler(commands=['unban'])
 def unban_user(m):
-
-    if not is_admin(
-        m.chat.id,
-        m.from_user.id
-    ):
+    if not is_admin(m.chat.id, m.from_user.id, message=m):
         return
 
-    safe_delete(
-        m.chat.id,
-        m.message_id
-    )
+    safe_delete(m.chat.id, m.message_id)
 
     if m.reply_to_message:
-
         target = m.reply_to_message.from_user
 
         db_execute(
-            "DELETE FROM users "
-            "WHERE chat_id=? AND user_id=? AND status='banned'",
+            "DELETE FROM users WHERE chat_id=? AND user_id=? AND status='banned'",
             (m.chat.id, target.id)
         )
 
-        bot.send_message(
-            m.chat.id,
-            f"✅ تم فك الحظر عن: {target.full_name}"
-        )
+        bot.send_message(m.chat.id, f"✅ تم فك الحظر عن: {target.full_name}")
 
 
-# --- النسخة الاحتياطية ---
 @bot.message_handler(commands=['backup'])
 def backup_db(m):
-
     if m.from_user.id != 1942624918:
         return
 
     try:
-
         with open('data.db', 'rb') as db_file:
-
             bot.send_document(
                 m.chat.id,
                 db_file,
                 caption="نسخة احتياطية لقاعدة البيانات"
             )
-
     except Exception as e:
-
-        bot.send_message(
-            m.chat.id,
-            f"خطأ: {e}"
-        )
+        bot.send_message(m.chat.id, f"خطأ: {e}")
 
 
 # =========================================================
@@ -540,87 +423,37 @@ def backup_db(m):
 
 @bot.message_handler(
     func=lambda m: True,
-    content_types=[
-        'text',
-        'photo',
-        'video',
-        'document',
-        'audio',
-        'voice',
-        'sticker'
-    ]
+    content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker']
 )
 def security_filter(m):
-
-    # استثناء المشرفين والمالك تماماً
-    if is_admin(
-        m.chat.id,
-        m.from_user.id
-    ):
+    # استثناء المشرفين (سواء بأسماءهم أو في وضع التخفي) والمالك تماماً
+    if is_admin(m.chat.id, m.from_user.id, message=m):
         return
 
-    text_check = (
-        m.text or
-        m.caption or
-        ""
-    )
+    text_check = m.text or m.caption or ""
 
-    # التقاط وحذف الرسائل الخدمية النصية
     if (
         "انضمام" in text_check or
         "رابط دعوة" in text_check or
         "بإضافة" in text_check or
         "أضاف" in text_check
     ):
-
-        safe_delete(
-            m.chat.id,
-            m.message_id
-        )
-
+        safe_delete(m.chat.id, m.message_id)
         return
 
-    # --- فحص الروابط ---
     has_url = False
-
     if m.entities:
-
         for entity in m.entities:
-
-            if entity.type in [
-                'url',
-                'text_link',
-                'mention'
-            ]:
-
+            if entity.type in ['url', 'text_link', 'mention']:
                 has_url = True
 
-    # --- فحص أرقام الهاتف ---
-    has_phone = bool(
-        re.search(
-            r'\+?\d[\d\-\s]{7,}\d',
-            text_check
-        )
-    )
+    has_phone = bool(re.search(r'\+?\d[\d\-\s]{7,}\d', text_check))
+    is_forwarded = m.forward_date is not None
 
-    # --- فحص الرسائل المعاد توجيهها ---
-    is_forwarded = (
-        m.forward_date is not None
-    )
-
-    # --- حذف المخالفة وإرسال التنبيه ---
     if has_url or has_phone or is_forwarded:
+        safe_delete(m.chat.id, m.message_id)
 
-        safe_delete(
-            m.chat.id,
-            m.message_id
-        )
-
-        user_mention = (
-            f"[{m.from_user.first_name}]"
-            f"(tg://user?id={m.from_user.id})"
-        )
-
+        user_mention = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
         warning_text = (
             f"⛔️ تنبيه :\n"
             f"عذرا {user_mention} "
@@ -634,16 +467,11 @@ def security_filter(m):
             parse_mode="Markdown"
         )
 
-        # حذف التحذير بعد 5 دقائق
         threading.Timer(
             300,
             safe_delete,
-            args=[
-                m.chat.id,
-                warning_msg.message_id
-            ]
+            args=[m.chat.id, warning_msg.message_id]
         ).start()
-
         return
 
 
@@ -651,18 +479,13 @@ def security_filter(m):
 # 5. Webhook المحدث
 # =========================================================
 
-@app.route(
-    f"/{TOKEN}",
-    methods=["POST"]
-)
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-
     if request.is_json:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
-
     else:
         return 'Forbidden', 403
 
@@ -672,34 +495,20 @@ def webhook():
 # =========================================================
 
 if __name__ == "__main__":
-
-    # الرابط الصحيح والمحدث لخدمتك الحالية على Render
     WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            10000
-        )
-    )
+    port = int(os.environ.get("PORT", 10000))
 
     try:
-
-        # التأكد من صحة التوكن والاتصال بتليجرام
         bot_info = bot.get_me()
-
         print("✅ تم الاتصال بتليجرام بنجاح")
         print(f"اسم البوت: {bot_info.username}")
 
-        # إزالة الويب هوك القديم
         bot.remove_webhook()
-
         print("✅ تم حذف الويب هوك السابق")
 
-        # تسجيل الويب هوك الجديد
         webhook_result = bot.set_webhook(
             url=f"{WEBHOOK_URL.rstrip('/')}/{TOKEN}",
-            drop_pending_updates=True,
+            drop_pending_updates=`True`,
             allowed_updates=[
                 "message",
                 "edited_message",
@@ -710,24 +519,15 @@ if __name__ == "__main__":
         )
 
         if webhook_result:
-
             print("✅ تم تسجيل Webhook بنجاح")
-
-            # التأكد من تسجيل الويب هوك دون كشف التوكن
             webhook_info = bot.get_webhook_info()
-
             print("✅ تم التحقق من عنوان Webhook")
             print(f"Webhook مضبوط: {bool(webhook_info.url)}")
-
         else:
-
             raise RuntimeError("فشل تسجيل Webhook")
 
     except Exception:
         print("❌ حدث خطأ أثناء تشغيل البوت أو الاتصال بتليجرام")
         raise
 
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    app.run(host="0.0.0.0", port=port)
