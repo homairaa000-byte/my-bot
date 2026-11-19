@@ -430,15 +430,6 @@ def security_filter(m):
 
     text_check = m.text or m.caption or ""
 
-    if (
-        "انضمام" in text_check or
-        "رابط دعوة" in text_check or
-        "بإضافة" in text_check or
-        "أضاف" in text_check
-    ):
-        safe_delete(m.chat.id, m.message_id)
-        return
-
     has_url = False
     if m.entities:
         for entity in m.entities:
