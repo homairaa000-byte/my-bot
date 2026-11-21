@@ -17,7 +17,7 @@ TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 if not TOKEN:
     raise ValueError("BOT_TOKEN غير موجود في متغيرات Render")
 
-WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
+WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL") or "https://my-bot-nquv.onrender.com"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -484,7 +484,7 @@ def webhook():
 # =========================================================
 
 if __name__ == "__main__":
-    WEBHOOK_URL = "https://my-bot-1-qygb.onrender.com"
+    WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL") or "https://my-bot-nquv.onrender.com"
     port = int(os.environ.get("PORT", 10000))
 
     try:
